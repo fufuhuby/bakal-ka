@@ -70,3 +70,11 @@ Assets/PrefabsVRT/
 .DS_Store
 Thumbs.db
 
+
+# Testovaci snimky z ladeni - pojmenovane rendery zustavaji
+Assets/Screenshots/screenshot-*.png
+Assets/Screenshots/screenshot-*.png.meta
+
+# Cache Unity AI nastroju (per-uzivatel, nic spolecneho s projektem)
+UserSettings/AI.*/
+UserSettings/Layouts/CurrentMaximizeLayout.dwlt

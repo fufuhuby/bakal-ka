@@ -1,0 +1,67 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6bb98629e79923344969c1263b8ec70e, type: 3}
+  m_Name: ShapeLibrary
+  m_EditorClassIdentifier: Assembly-CSharp::BP.Core.ShapeLibrary
+  shapes:
+  - shape: 0
+    prefab: {fileID: 5749563070608406850, guid: 987762593fd0eaa4f91b00901f5c583b, type: 3}
+    icon: {fileID: 21300000, guid: 1ae519ff94087d646a78e78209cc1647, type: 3}
+    wireMesh: {fileID: 4300000, guid: 6eeb2a4778a81434f81f1b67c0d7178f, type: 2}
+  - shape: 1
+    prefab: {fileID: 640569155474959745, guid: 0d4f37b0146b922459d3977820aaec15, type: 3}
+    icon: {fileID: 21300000, guid: c1d28399de38eef4981c979fe8e77f1b, type: 3}
+    wireMesh: {fileID: 4300000, guid: 83d74b06ab6508a4586c9da5c299e549, type: 2}
+  - shape: 2
+    prefab: {fileID: 1038454244355811328, guid: 26bd1866e22c0d74aba8a1c63cba3c37, type: 3}
+    icon: {fileID: 21300000, guid: a90049804245969438f570a95020716e, type: 3}
+    wireMesh: {fileID: 4300000, guid: f5a4fa57655ea7840a5e0a07c33aef82, type: 2}
+  - shape: 3
+    prefab: {fileID: 2904931961279029751, guid: b0f90234c35e3e64ab96e451ee7b0b6b, type: 3}
+    icon: {fileID: 21300000, guid: fbc66922aeaca90428d82541c93e2f51, type: 3}
+    wireMesh: {fileID: 4300000, guid: cdce8bae5777cfa4488c3aa5062a39bb, type: 2}
+  - shape: 4
+    prefab: {fileID: 3467419173798842341, guid: dce94dae314be9d4491fb75a2372fd5e, type: 3}
+    icon: {fileID: 21300000, guid: 1103ee2a00805e747aa160dd7b63ffa4, type: 3}
+    wireMesh: {fileID: 4300000, guid: 6a4f93a70a8597e459058d7e0ea69790, type: 2}
+  - shape: 5
+    prefab: {fileID: 2081266497894279001, guid: b4b3ed2deea65114b86f5be2cf697106, type: 3}
+    icon: {fileID: 21300000, guid: 811a0ea5c6222f34fa219de53b5df5e2, type: 3}
+    wireMesh: {fileID: 4300000, guid: a1e497eabe6abc04fa29e8e0925d3517, type: 2}
+  - shape: 6
+    prefab: {fileID: 2243441023219021606, guid: 711f47fb03faddf4ba26fc46555a7964, type: 3}
+    icon: {fileID: 21300000, guid: d1f03b3faba45014cbf8b18267262244, type: 3}
+    wireMesh: {fileID: 4300000, guid: 59d9a5788394aaa4e9cf80022b49395f, type: 2}
+  colors:
+  - color: 0
+    solidMaterial: {fileID: 2100000, guid: b98315e5f66cf104b9da6b7f64b3fd3a, type: 2}
+    displayColor: {r: 0.059999965, g: 0.27999997, b: 0.88, a: 1}
+  - color: 1
+    solidMaterial: {fileID: 2100000, guid: 81fe5c0747d30f1449190f6d35d0716e, type: 2}
+    displayColor: {r: 0.079999976, g: 0.68, b: 0.21999997, a: 1}
+  - color: 2
+    solidMaterial: {fileID: 2100000, guid: b8341fb413fb7e44592a371a8da98cfe, type: 2}
+    displayColor: {r: 1, g: 0.94, b: 0.24999997, a: 1}
+  - color: 3
+    solidMaterial: {fileID: 2100000, guid: ad174f52cc01bad40924305af0098d15, type: 2}
+    displayColor: {r: 0.86, g: 0.089999996, b: 0.06999998, a: 1}
+  - color: 4
+    solidMaterial: {fileID: 2100000, guid: 289aead9785f3c04898cb09913ac1809, type: 2}
+    displayColor: {r: 0.41999996, g: 0.059999965, b: 0.72, a: 1}
+  - color: 5
+    solidMaterial: {fileID: 2100000, guid: c8c329fb0e64d5b4eaaf0254c7a46f4b, type: 2}
+    displayColor: {r: 0.97999996, g: 0.5, b: 0.04, a: 1}
+  - color: 6
+    solidMaterial: {fileID: 2100000, guid: 562eaec7ce621dd45b6cec1daa742b99, type: 2}
+    displayColor: {r: 1, g: 0.45, b: 0.82, a: 1}
+  ghostMaterial: {fileID: 2100000, guid: 134365b449123a3439f30472bf3dbfeb, type: 2}
+  templateMaterial: {fileID: 2100000, guid: 8509b356ffc141b4db90ceacfd309e48, type: 2}
