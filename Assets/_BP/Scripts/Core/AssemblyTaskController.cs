@@ -69,6 +69,13 @@ namespace BP.Core
         /// </summary>
         public event Action<ShapeInstance, float> PlacementRejected;
 
+        /// <summary>
+        /// Objekt byl opravdu vzat zpět. Průvodce z toho pozná, že se nácvik
+        /// „zpět" povedl — samotné vyslovení povelu nestačí, protože zasazený
+        /// objekt se vrátit nedá a povel by vyzněl naprázdno.
+        /// </summary>
+        public event Action<ShapeInstance> ObjectUndone;
+
         private IObjectRequestSource _source;
         private TrialLogger _logger;
 
@@ -139,13 +146,13 @@ namespace BP.Core
             // musí se to říct, ne spolknout.
             if (!IsRunning)
             {
-                if (RequestBlocked != null) RequestBlocked("NO BLOCK RUNNING");
+                if (RequestBlocked != null) RequestBlocked("NEBĚŽÍ ŽÁDNÝ BLOK");
                 return;
             }
 
             if (IsComplete)
             {
-                if (RequestBlocked != null) RequestBlocked("BLOCK COMPLETE");
+                if (RequestBlocked != null) RequestBlocked("BLOK HOTOV");
                 return;
             }
 
@@ -157,21 +164,22 @@ namespace BP.Core
                     _logger.Log(LogEvent.Note, step: CurrentStep + 1,
                         detail: "pozadavek ignorovan - neumisteny objekt");
 
-                if (RequestBlocked != null) RequestBlocked("PLACE THE OBJECT FIRST");
+                if (RequestBlocked != null) RequestBlocked("NEJDŘÍV POLOŽ OBJEKT");
                 return;
             }
 
-            var instance = spawner.Spawn(request.Shape, request.Color, CurrentStep);
+            var instance = spawner.Spawn(request.Shape, request.Color, request.Size, CurrentStep);
             if (instance == null) return;
 
             _created.Add(instance);
             _pending.Add(instance);
 
             if (_logger != null)
-                _logger.Log(LogEvent.ObjectSpawned, CurrentStep + 1, request.Shape, request.Color);
+                _logger.Log(LogEvent.ObjectSpawned, CurrentStep + 1,
+                    request.Shape, request.Color, request.Size);
 
             var step = validator.Visualizer.Template.GetStep(CurrentStep);
-            if (!instance.Matches(step.shape, step.color))
+            if (!instance.Matches(step.shape, step.color, step.size))
             {
                 if (_logger != null)
                     _logger.Log(LogEvent.WrongObjectCreated, CurrentStep + 1, request.Shape, request.Color,
@@ -194,25 +202,34 @@ namespace BP.Core
         {
             if (!IsRunning) return;
 
-            if (_created.Count == 0)
+            // MAŽE SE JEN OBJEKT, KTERÝ JEŠTĚ NENÍ ZASAZENÝ.
+            //
+            // Dřív se vracel poslední vytvořený, tedy i ten, který už
+            // v konstrukci seděl — jedno vyslovené „zpět" pak rozebralo
+            // hotovou část stavby a participant musel opravovat něco, co
+            // udělal správně. Zasazený objekt je hotový krok; vzít zpět jde
+            // jen to, co se ještě nepovedlo umístit.
+            //
+            // Platí pro OBĚ podmínky. Kdyby tlačítko STEP BACK umělo víc než
+            // povel „zpět", lišily by se podmínky i v tom, co s nimi jde
+            // dělat — a rozdíl v datech by se nedal přičíst modalitě.
+            if (_pending.Count == 0)
             {
-                if (RequestBlocked != null) RequestBlocked("NOTHING TO UNDO");
+                if (RequestBlocked != null) RequestBlocked("NENÍ CO VRÁTIT");
                 return;
             }
 
-            var last = _created[_created.Count - 1];
-            _created.RemoveAt(_created.Count - 1);
-            _pending.Remove(last);
-
-            // Když se maže už zasazený objekt, krok se musí vrátit,
-            // jinak by se struktura a stav rozešly.
-            if (last.IsConfirmed && CurrentStep > 0) CurrentStep--;
+            var last = _pending[_pending.Count - 1];
+            _pending.RemoveAt(_pending.Count - 1);
+            _created.Remove(last);
 
             if (_logger != null)
                 _logger.Log(LogEvent.UndoUsed, CurrentStep + 1, last.Shape, last.Color);
 
             UnhookRelease(last);
             spawner.Remove(last);
+
+            if (ObjectUndone != null) ObjectUndone(last);
         }
 
         // ---- Vyhodnocení umístění ----
@@ -236,9 +253,22 @@ namespace BP.Core
             if (grab != null) grab.selectExited.RemoveListener(OnReleased);
         }
 
+        /// <summary>
+        /// Přijímat umístění? Vypíná to průvodce v kroku, kde se nacvičuje
+        /// vrácení objektu.
+        ///
+        /// BEZ TOHO SE TEN KROK DAL PŘESKOČIT: participant objekt místo
+        /// vrácení prostě položil, krok se uzavřel a povel „zpět" si nikdy
+        /// nezkusil — přitom je to jediná oprava, kterou u hlasu má, když
+        /// se rozpoznávání splete.
+        /// </summary>
+        public void SetPlacementEnabled(bool value) => _placementEnabled = value;
+
+        private bool _placementEnabled = true;
+
         private void OnReleased(SelectExitEventArgs args)
         {
-            if (!IsRunning || IsComplete) return;
+            if (!IsRunning || IsComplete || !_placementEnabled) return;
 
             var instance = args.interactableObject.transform.GetComponent<ShapeInstance>();
             if (instance == null || instance.IsConfirmed) return;
@@ -246,8 +276,9 @@ namespace BP.Core
             var result = validator.Evaluate(instance, CurrentStep);
 
             if (_logger != null)
-                _logger.Log(LogEvent.ObjectPlaced, CurrentStep + 1, instance.Shape, instance.Color,
-                    result.PositionError, result.RotationError,
+                _logger.Log(LogEvent.ObjectPlaced, CurrentStep + 1,
+                    instance.Shape, instance.Color, instance.Size,
+                    positionError: result.PositionError, rotationError: result.RotationError,
                     detail: result.IsAccepted ? "prijato" : (result.IsCorrectObject ? "mimo toleranci" : "spatny objekt"));
 
             if (!result.IsAccepted)
@@ -272,7 +303,8 @@ namespace BP.Core
 
             var finished = CurrentStep;
             if (_logger != null)
-                _logger.Log(LogEvent.StepCompleted, finished + 1, instance.Shape, instance.Color,
+                _logger.Log(LogEvent.StepCompleted, finished + 1,
+                    instance.Shape, instance.Color, instance.Size,
                     reactionTime: Time.realtimeSinceStartup - instance.SpawnTime);
 
             // Krok se posune PŘED vyvoláním eventu. Obráceně by posluchač

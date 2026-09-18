@@ -27,6 +27,7 @@ namespace BP.Logging
         VoiceRejected,
         VoiceMisrecognized,
         StepCompleted,
+        ReferenceRevealed,
         SecondaryTargetActivated,
         SecondaryTargetHit,
         SecondaryTargetMissed,
@@ -84,7 +85,7 @@ namespace BP.Logging
             _writer.WriteLine($"# started{Delimiter}{DateTime.Now:yyyy-MM-dd HH:mm:ss}");
 
             _writer.WriteLine(string.Join(Delimiter,
-                "t", "event", "step", "shape", "color",
+                "t", "event", "step", "shape", "color", "size",
                 "pos_err_m", "rot_err_deg", "rt_s", "detail"));
 
             _blockStartTime = Time.realtimeSinceStartup;
@@ -102,6 +103,7 @@ namespace BP.Logging
             int? step = null,
             ShapeType? shape = null,
             PaletteColor? color = null,
+            ShapeSize? size = null,
             float? positionError = null,
             float? rotationError = null,
             float? reactionTime = null,
@@ -119,6 +121,7 @@ namespace BP.Logging
                 step?.ToString(CultureInfo.InvariantCulture) ?? "",
                 shape?.ToString() ?? "",
                 color?.ToString() ?? "",
+                size.HasValue ? ShapeSizes.Label(size.Value) : "",
                 F(positionError),
                 F(rotationError),
                 F(reactionTime),

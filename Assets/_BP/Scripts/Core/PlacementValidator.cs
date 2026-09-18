@@ -60,7 +60,7 @@ namespace BP.Core
                 return result;
 
             var step = template.GetStep(stepIndex);
-            result.IsCorrectObject = instance.Matches(step.shape, step.color);
+            result.IsCorrectObject = instance.Matches(step.shape, step.color, step.size);
 
             var targetPos = templateVisualizer.GetTargetPosition(stepIndex);
             var targetRot = templateVisualizer.GetTargetRotation(stepIndex);
@@ -95,7 +95,7 @@ namespace BP.Core
             if (template == null || stepIndex < 0 || stepIndex >= template.StepCount) return false;
 
             var step = template.GetStep(stepIndex);
-            if (!instance.Matches(step.shape, step.color)) return false;
+            if (!instance.Matches(step.shape, step.color, step.size)) return false;
 
             var d = Vector3.Distance(instance.transform.position, templateVisualizer.GetTargetPosition(stepIndex));
             return d <= template.positionTolerance;

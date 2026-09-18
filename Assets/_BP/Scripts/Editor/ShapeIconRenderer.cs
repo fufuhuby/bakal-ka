@@ -21,6 +21,20 @@ namespace BP.EditorTools
         /// <summary>Izometrický úhel, aby byla vidět trojrozměrnost tvaru.</summary>
         private static readonly Vector3 ViewAngle = new Vector3(22f, -34f, 0f);
 
+        /// <summary>
+        /// Torus se renderuje ze strmějšího nadhledu. Je plochý (6 × 2 cm)
+        /// a díra má jen pětinu vnějšího průměru, takže při společných 22°
+        /// ji zakryje vlastní stěna prstence a ikona vyjde jako beztvará
+        /// čočka. Rozpoznat tvar z ikony je přitom celá práce, kterou
+        /// participant v menu dělá — a dobu toho hledání experiment měří.
+        /// Ostatní tvary nadhled nepotřebují, jejich silueta je jednoznačná
+        /// i zboku, a proto jim zůstává původní úhel.
+        /// </summary>
+        private static readonly Vector3 TorusViewAngle = new Vector3(55f, -34f, 0f);
+
+        private static Vector3 UhelPohledu(ShapeType shape)
+            => shape == ShapeType.Torus ? TorusViewAngle : ViewAngle;
+
         [MenuItem("BP/Generovat ikony tvaru")]
         public static void GenerateAll()
         {
@@ -44,7 +58,7 @@ namespace BP.EditorTools
                 var mf = prefab.GetComponent<MeshFilter>();
                 if (mf == null || mf.sharedMesh == null) continue;
 
-                var png = Render(mf.sharedMesh, iconMaterial);
+                var png = Render(mf.sharedMesh, iconMaterial, UhelPohledu(shape));
                 var path = $"{OutputFolder}/Icon_{shape}.png";
                 File.WriteAllBytes(path, png);
                 paths.Add(path);
@@ -74,7 +88,7 @@ namespace BP.EditorTools
             return m;
         }
 
-        private static byte[] Render(Mesh mesh, Material material)
+        private static byte[] Render(Mesh mesh, Material material, Vector3 uhel)
         {
             var rt = new RenderTexture(Resolution, Resolution, 24, RenderTextureFormat.ARGB32);
             rt.antiAliasing = 8;
@@ -95,7 +109,7 @@ namespace BP.EditorTools
 
             var subject = new GameObject("__IconSubject__");
             subject.transform.position = origin;
-            subject.transform.rotation = Quaternion.Euler(ViewAngle);
+            subject.transform.rotation = Quaternion.Euler(uhel);
             subject.AddComponent<MeshFilter>().sharedMesh = mesh;
             subject.AddComponent<MeshRenderer>().sharedMaterial = material;
 

@@ -9,7 +9,7 @@ namespace BP.Input
 {
     /// <summary>
     /// Vizuál hand-fixed menu podle skice b4: vlevo sloupec barev, vpravo
-    /// sloupec tvarů, dole STEP BACK a CREATE, pod nimi řádek pro hlášku.
+    /// sloupec tvarů, dole ZPĚT a VYTVOŘIT, pod nimi řádek pro hlášku.
     ///
     /// Vybraná dlaždice dostane obrys s odsazením — „visibility of system
     /// status": participant musí kdykoli vidět, co má rozjednané, jinak by
@@ -34,12 +34,19 @@ namespace BP.Input
         [Tooltip("Volitelné. Slouží jen k zobrazení hlášky, když je požadavek odmítnut.")]
         [SerializeField] private AssemblyTaskController taskController;
 
+        [Header("Ikony akčních tlačítek")]
+        [Tooltip("Kladivo na tlačítku vytvoření. Generuje BP/Generovat ikony tlacitek.")]
+        [SerializeField] private Sprite createIcon;
+
+        [Tooltip("Šipka do kolečka na tlačítku zpět.")]
+        [SerializeField] private Sprite undoIcon;
+
         [Header("Rozměry (px na canvasu)")]
         [SerializeField] private float tileSize = 50f;
         [SerializeField] private float tileSpacing = 4f;
-        [SerializeField] private float columnGap = 34f;
+        [Tooltip("Mezera mezi sloupcem barev a sloupcem tvarů.")]
+        [SerializeField] private float columnGap = 14f;
         [SerializeField] private float padding = 16f;
-        [SerializeField] private float buttonHeight = 56f;
         [SerializeField] private float noticeHeight = 22f;
 
         [Tooltip("O kolik px je obrys větší než dlaždice (outline with offset).")]
@@ -50,14 +57,11 @@ namespace BP.Input
 
         [Header("Hlášky")]
         [SerializeField] private float noticeDuration = 2f;
-        [SerializeField] private Color noticeColor = new Color(1f, 0.72f, 0.2f, 1f);
+        [SerializeField] private Color noticeColor = PanelStyle.Warn;
 
         [Header("Barvy panelu")]
-        [SerializeField] private Color panelColor = new Color(0.10f, 0.11f, 0.13f, 0.92f);
-        [SerializeField] private Color tileBackground = new Color(0.92f, 0.92f, 0.94f, 1f);
+        [Tooltip("Barvy i zaoblení přebírá PanelStyle, stejně jako okno s hlasovými příkazy.")]
         [SerializeField] private Color outlineColor = Color.white;
-        [SerializeField] private Color buttonColor = new Color(0.24f, 0.26f, 0.30f, 1f);
-        [SerializeField] private Color createReadyColor = new Color(0.16f, 0.55f, 0.24f, 1f);
 
         private const string CanvasName = "MenuCanvas";
 
@@ -66,6 +70,24 @@ namespace BP.Input
 
         private readonly Dictionary<ShapeType, GameObject> _shapeOutlines =
             new Dictionary<ShapeType, GameObject>();
+
+        private readonly Dictionary<ShapeSize, GameObject> _sizeOutlines =
+            new Dictionary<ShapeSize, GameObject>();
+
+        private readonly Dictionary<ShapeSize, GameObject> _sizeTiles =
+            new Dictionary<ShapeSize, GameObject>();
+
+        // Dlazdice barev a tvaru se drzi kvuli zamykani v tutorialu.
+        private readonly Dictionary<PaletteColor, Button> _colorButtons =
+            new Dictionary<PaletteColor, Button>();
+
+        private readonly Dictionary<ShapeType, Button> _shapeButtons =
+            new Dictionary<ShapeType, Button>();
+
+        private Button _createButton;
+        private Button _stepBackButton;
+
+        private GameObject _sizeStrip;
 
         private Image _createButtonImage;
         private TextMeshProUGUI _noticeText;
@@ -84,14 +106,22 @@ namespace BP.Input
 
         private void OnEnable()
         {
-            if (source != null) source.SelectionChanged += Refresh;
+            if (source != null)
+            {
+                source.SelectionChanged += Refresh;
+                source.PartsChanged += Refresh;
+            }
             if (taskController != null) taskController.RequestBlocked += OnRequestBlocked;
             Refresh();
         }
 
         private void OnDisable()
         {
-            if (source != null) source.SelectionChanged -= Refresh;
+            if (source != null)
+            {
+                source.SelectionChanged -= Refresh;
+                source.PartsChanged -= Refresh;
+            }
             if (taskController != null) taskController.RequestBlocked -= OnRequestBlocked;
         }
 
@@ -112,6 +142,11 @@ namespace BP.Input
         {
             if (source == null) return;
 
+            // Zamky jako PRVNI. Prepnuti Button.interactable spousti barevny
+            // prechod, ktery prebarvi cilovou grafiku na normalColor — kdyby
+            // beho tady az nakonec, smazalo by to zelene CREATE nastavene nize.
+            RefreshLocks();
+
             foreach (var kv in _colorOutlines)
                 if (kv.Value != null)
                     kv.Value.SetActive(source.SelectedColor.HasValue && source.SelectedColor.Value == kv.Key);
@@ -120,10 +155,57 @@ namespace BP.Input
                 if (kv.Value != null)
                     kv.Value.SetActive(source.SelectedShape.HasValue && source.SelectedShape.Value == kv.Key);
 
+            // Ve dvouvlastnostnim bloku prilepek cely zhasne — i s pozadim.
+            // Nabizet volbu, ktera nic nedela, by participanta ucilo klikat
+            // naprazdno; prazdne misto v panelu je stejne matouci.
+            if (_sizeStrip != null) _sizeStrip.SetActive(source.RequiresSize);
+
+            foreach (var kv in _sizeTiles)
+                if (kv.Value != null) kv.Value.SetActive(source.RequiresSize);
+
+            foreach (var kv in _sizeOutlines)
+                if (kv.Value != null)
+                    kv.Value.SetActive(source.RequiresSize
+                        && source.SelectedSize.HasValue && source.SelectedSize.Value == kv.Key);
+
             // CREATE zůstane šedé, dokud není vybráno obojí — participant tak
             // nemusí zkoušet, jestli tlačítko vůbec něco udělá.
             if (_createButtonImage != null)
-                _createButtonImage.color = source.CanCreate ? createReadyColor : buttonColor;
+                _createButtonImage.color = source.CanCreate ? PanelStyle.Positive : PanelStyle.Neutral;
+        }
+
+        /// <summary>
+        /// Zhasne dlaždice, které tutoriál v aktuálním kroku zamkl.
+        ///
+        /// PROČ NESTAČÍ IGNOROVAT KLIK: dlaždice, která vypadá stejně jako
+        /// ostatní a nic nedělá, vypadá jako rozbitá aplikace. Zhasnutá
+        /// dlaždice sděluje, že teď na řadě není, a participant se vrátí
+        /// k tomu, co po něm boxík chce.
+        /// </summary>
+        private void RefreshLocks()
+        {
+            var barvy = (source.AllowedParts & MenuPart.Colors) != 0;
+            var tvary = (source.AllowedParts & MenuPart.Shapes) != 0;
+            var velikosti = (source.AllowedParts & MenuPart.Sizes) != 0;
+
+            foreach (var kv in _colorButtons)
+                if (kv.Value != null) kv.Value.interactable = barvy;
+
+            foreach (var kv in _shapeButtons)
+                if (kv.Value != null) kv.Value.interactable = tvary;
+
+            foreach (var kv in _sizeTiles)
+            {
+                if (kv.Value == null) continue;
+                var b = kv.Value.GetComponent<Button>();
+                if (b != null) b.interactable = velikosti;
+            }
+
+            if (_createButton != null)
+                _createButton.interactable = (source.AllowedParts & MenuPart.Create) != 0;
+
+            if (_stepBackButton != null)
+                _stepBackButton.interactable = (source.AllowedParts & MenuPart.StepBack) != 0;
         }
 
         private void OnRequestBlocked(string reason) => ShowNotice(reason);
@@ -139,7 +221,12 @@ namespace BP.Input
         }
 
         /// <summary>
-        /// Hláška pod tlačítky. Anglicky, stejně jako hlasová gramatika.
+        /// Hláška pod tlačítky.
+        ///
+        /// ČESKY, stejně jako hlasové povely. Dřív byla anglicky, protože se
+        /// počítalo s anglickou gramatikou rozpoznávání; ta je ale česká,
+        /// takže míchat jazyky už nemá důvod a jen to přidává práci navíc.
+        ///
         /// sticky = zůstane, dokud ji někdo nesmaže (pro stavové problémy).
         /// </summary>
         public void ShowNotice(string message, bool sticky = false)
@@ -172,6 +259,13 @@ namespace BP.Input
         {
             _colorOutlines.Clear();
             _shapeOutlines.Clear();
+            _colorButtons.Clear();
+            _shapeButtons.Clear();
+            _sizeOutlines.Clear();
+            _sizeTiles.Clear();
+
+            var strip = canvas.Find("SizeStrip");
+            _sizeStrip = strip != null ? strip.gameObject : null;
 
             foreach (PaletteColor c in Enum.GetValues(typeof(PaletteColor)))
             {
@@ -183,6 +277,8 @@ namespace BP.Input
 
                 var btn = tile.GetComponent<Button>();
                 if (btn == null) continue;
+
+                _colorButtons[c] = btn;
 
                 var captured = c;
                 btn.onClick.RemoveAllListeners();
@@ -200,9 +296,30 @@ namespace BP.Input
                 var btn = tile.GetComponent<Button>();
                 if (btn == null) continue;
 
+                _shapeButtons[s] = btn;
+
                 var captured = s;
                 btn.onClick.RemoveAllListeners();
                 btn.onClick.AddListener(() => source.SelectShape(captured));
+            }
+
+            foreach (ShapeSize z in Enum.GetValues(typeof(ShapeSize)))
+            {
+                var jmeno = "Size_" + z;
+
+                var outline = canvas.Find("Outline_" + jmeno);
+                if (outline != null) _sizeOutlines[z] = outline.gameObject;
+
+                var tile = canvas.Find(jmeno);
+                if (tile == null) continue;
+                _sizeTiles[z] = tile.gameObject;
+
+                var btn = tile.GetComponent<Button>();
+                if (btn == null) continue;
+
+                var captured = z;
+                btn.onClick.RemoveAllListeners();
+                btn.onClick.AddListener(() => source.SelectSize(captured));
             }
 
             BindActionButton(canvas, "Button_CREATE", source.Create, true);
@@ -233,7 +350,12 @@ namespace BP.Input
                 btn.onClick.AddListener(() => action());
             }
 
-            if (isCreate) _createButtonImage = t.GetComponent<Image>();
+            if (isCreate)
+            {
+                _createButtonImage = t.GetComponent<Image>();
+                _createButton = btn;
+            }
+            else _stepBackButton = btn;
         }
 
         // ---- Stavba hierarchie ----
@@ -255,12 +377,20 @@ namespace BP.Input
 
             const float progressHeight = 26f;
 
+            var sizes = (ShapeSize[])Enum.GetValues(typeof(ShapeSize));
+
             var gridHeight = rows * tileSize + (rows - 1) * tileSpacing;
+
+            // Hlavni panel ma dva sloupce, barvu a tvar. Velikosti jsou
+            // PRILEPEK vpravo s vlastnim pozadim — v bloku, ktery velikosti
+            // neresi, se prilepek cely zhasne a panel nema prazdne misto.
             var width = padding * 2f + tileSize * 2f + columnGap;
             var height = padding * 2f + progressHeight + gridHeight
-                         + tileSpacing * 3f + buttonHeight + noticeHeight;
+                         + tileSpacing * 3f + tileSize + noticeHeight;
 
-            var canvas = CreateCanvas(width, height);
+            // Canvas je sirsi nez panel, aby se do nej vesel prilepek vpravo.
+            // Pozadi hlavniho panelu zustava uzke.
+            var canvas = CreateCanvas(width + (tileSize + 10f * 3f) * 2f, height);
             CreateBackground(canvas, width, height);
 
             BuildProgress(canvas,
@@ -270,6 +400,10 @@ namespace BP.Input
             var gridTop = height * 0.5f - padding - progressHeight;
             var leftX = -(columnGap * 0.5f + tileSize * 0.5f);
             var rightX = columnGap * 0.5f + tileSize * 0.5f;
+
+            // Prilepek sedi tesne za pravou hranou hlavniho panelu.
+            const float sizeGap = 10f;
+            var sizeX = width * 0.5f + sizeGap + tileSize * 0.5f;
 
             for (var i = 0; i < colors.Length; i++)
             {
@@ -282,17 +416,34 @@ namespace BP.Input
             {
                 var y = gridTop - tileSize * 0.5f - i * (tileSize + tileSpacing);
                 BuildTile(canvas, "Shape_" + shapes[i], "Outline_" + shapes[i],
-                    new Vector2(rightX, y), tileBackground, library.GetIcon(shapes[i]));
+                    new Vector2(rightX, y), PanelStyle.Plate, library.GetIcon(shapes[i]));
             }
 
-            var buttonY = -height * 0.5f + padding + noticeHeight + buttonHeight * 0.5f;
-            var buttonWidth = (width - padding * 2f - tileSpacing) * 0.5f;
+            // Pozadi prilepku se stavi PRED dlazdicemi, aby zustalo pod nimi —
+            // poradi potomku urcuje poradi vykresleni.
+            var stripHeight = sizes.Length * tileSize + (sizes.Length - 1) * tileSpacing;
+            var strip = NewUIObject("SizeStrip", canvas,
+                new Vector2(sizeX, gridTop - stripHeight * 0.5f),
+                new Vector2(tileSize + sizeGap * 2f, stripHeight + sizeGap * 2f));
+            PanelStyle.ApplyRounded(strip.AddComponent<Image>(), PanelStyle.RadiusPanel,
+                PanelStyle.Window);
 
-            BuildActionButtonVisual(canvas, "Button_STEPBACK", "STEP BACK",
-                new Vector2(leftX - (tileSize - buttonWidth) * 0.5f, buttonY), buttonWidth);
+            for (var i = 0; i < sizes.Length; i++)
+            {
+                var y = gridTop - tileSize * 0.5f - i * (tileSize + tileSpacing);
+                BuildSizeTile(canvas, sizes[i], new Vector2(sizeX, y));
+            }
 
-            BuildActionButtonVisual(canvas, "Button_CREATE", "CREATE",
-                new Vector2(rightX + (tileSize - buttonWidth) * 0.5f, buttonY), buttonWidth);
+            var buttonY = -height * 0.5f + padding + noticeHeight + tileSize * 0.5f;
+
+            // Tlačítko je přesně tak široké jako sloupec nad ním a stojí na
+            // jeho ose. Dřív bylo širší a přesahovalo do mezery mezi sloupci,
+            // takže panel měl dvě různé svislé mřížky a nic na sebe nesedělo.
+            BuildActionButtonVisual(canvas, "Button_STEPBACK", "ZPĚT", undoIcon,
+                new Vector2(leftX, buttonY), tileSize);
+
+            BuildActionButtonVisual(canvas, "Button_CREATE", "VYTVOŘIT", createIcon,
+                new Vector2(rightX, buttonY), tileSize);
 
             BuildNotice(canvas,
                 new Vector2(0f, -height * 0.5f + padding * 0.5f + noticeHeight * 0.5f),
@@ -306,7 +457,11 @@ namespace BP.Input
         {
             _colorOutlines.Clear();
             _shapeOutlines.Clear();
+            _colorButtons.Clear();
+            _shapeButtons.Clear();
             _createButtonImage = null;
+            _createButton = null;
+            _stepBackButton = null;
             _noticeText = null;
 
             // Maže se POUZE canvas. Na kořeni menu visí i další věci
@@ -347,9 +502,7 @@ namespace BP.Input
         private void CreateBackground(RectTransform canvas, float width, float height)
         {
             var go = NewUIObject("Background", canvas, Vector2.zero, new Vector2(width, height));
-            var img = go.AddComponent<Image>();
-            img.color = panelColor;
-            img.raycastTarget = false;
+            PanelStyle.ApplyRounded(go.AddComponent<Image>(), PanelStyle.RadiusPanel, PanelStyle.Window);
         }
 
         private void BuildTile(RectTransform canvas, string tileName, string outlineName,
@@ -357,14 +510,15 @@ namespace BP.Input
         {
             var outlineSize = new Vector2(tileSize + outlineOffset * 2f, tileSize + outlineOffset * 2f);
             var outline = NewUIObject(outlineName, canvas, pos, outlineSize);
-            var outlineImg = outline.AddComponent<Image>();
-            outlineImg.color = outlineColor;
-            outlineImg.raycastTarget = false;
+            // Obrys má větší poloměr než dlaždice přesně o odsazení, jinak
+            // by se rohy rozcházely a rámeček by u rohu vypadal silnější.
+            PanelStyle.ApplyRounded(outline.AddComponent<Image>(),
+                PanelStyle.RadiusTile + outlineOffset, outlineColor);
             outline.SetActive(false);
 
             var go = NewUIObject(tileName, canvas, pos, new Vector2(tileSize, tileSize));
             var img = go.AddComponent<Image>();
-            img.color = tint;
+            PanelStyle.ApplyRoundedButton(img, PanelStyle.RadiusTile, tint);
 
             var btn = go.AddComponent<Button>();
             btn.targetGraphic = img;
@@ -380,27 +534,106 @@ namespace BP.Input
             iconImg.raycastTarget = false;
         }
 
-        private void BuildActionButtonVisual(RectTransform canvas, string name, string label,
-            Vector2 pos, float width)
+        /// <summary>
+        /// Dlaždice velikosti. Nese text (S / L / XL), ne ikonu — velikost
+        /// nakreslená jako různě velký tvar by se v dlaždici 2,5 cm nedala
+        /// odlišit, a rozhodovala by čitelnost místo modality.
+        /// </summary>
+        private void BuildSizeTile(RectTransform canvas, ShapeSize size, Vector2 pos)
         {
-            var go = NewUIObject(name, canvas, pos, new Vector2(width, buttonHeight));
+            var jmeno = "Size_" + size;
 
+            var outlineSize = new Vector2(tileSize + outlineOffset * 2f, tileSize + outlineOffset * 2f);
+            var outline = NewUIObject("Outline_" + jmeno, canvas, pos, outlineSize);
+            PanelStyle.ApplyRounded(outline.AddComponent<Image>(),
+                PanelStyle.RadiusTile + outlineOffset, outlineColor);
+            outline.SetActive(false);
+
+            var go = NewUIObject(jmeno, canvas, pos, new Vector2(tileSize, tileSize));
             var img = go.AddComponent<Image>();
-            img.color = buttonColor;
+            PanelStyle.ApplyRoundedButton(img, PanelStyle.RadiusTile, PanelStyle.Plate);
 
             var btn = go.AddComponent<Button>();
             btn.targetGraphic = img;
 
+            // OBRÁZEK MÍSTO PÍSMENE. „M" má člověk z triček spojené s medium,
+            // takže při hlasovém ovládání musel z písmene vyrobit slovo
+            // „střední“ — překlad, který v menu neexistuje, protože se na
+            // dlaždici jen klepne. Ten rozdíl by se schoval do naměřeného
+            // času a tvářil se jako cena hlasu.
+            var stupnice = library != null ? library.GetSizeIcon(size) : null;
+
+            if (stupnice != null)
+            {
+                var ikonaGo = NewUIObject("Ikona", (RectTransform)go.transform, Vector2.zero,
+                    new Vector2(tileSize * 0.74f, tileSize * 0.74f));
+                var ikona = ikonaGo.AddComponent<Image>();
+                ikona.sprite = stupnice;
+                ikona.preserveAspect = true;
+                ikona.raycastTarget = false;
+                ikona.color = PanelStyle.Window;
+                return;
+            }
+
             var textGo = NewUIObject("Label", (RectTransform)go.transform, Vector2.zero,
-                new Vector2(width, buttonHeight));
+                new Vector2(tileSize, tileSize));
+            var tmp = textGo.AddComponent<TextMeshProUGUI>();
+            tmp.text = ShapeSizes.Label(size);
+            tmp.fontSize = 26f;
+            tmp.enableAutoSizing = true;
+            tmp.fontSizeMin = 10f;
+            tmp.fontSizeMax = 30f;
+            tmp.alignment = TextAlignmentOptions.Center;
+            tmp.color = PanelStyle.Window;
+            tmp.raycastTarget = false;
+            if (font != null) tmp.font = font;
+        }
+
+        /// <summary>
+        /// Akční tlačítko. ČTVEREC stejné velikosti jako dlaždice barev
+        /// a tvarů, aby panel držel jednu mřížku.
+        ///
+        /// OBRÁZEK, NE SLOVO. „VYTVOŘIT" se do 2,5 cm vejde jen při velikosti
+        /// písma, u které se popisek musí luštit — a luštění je čas navíc
+        /// v podmínce, jejíž rychlost se porovnává s hlasem. Silueta se pozná
+        /// na jedno mrknutí a nese ji celá plocha tlačítka, ne tenký tah.
+        ///
+        /// Text zůstává jako záloha: kdyby ikona chyběla, tlačítko pořád
+        /// řekne, co dělá, místo aby vypadalo prázdné.
+        /// </summary>
+        private void BuildActionButtonVisual(RectTransform canvas, string name, string label,
+            Sprite icon, Vector2 pos, float strana)
+        {
+            var go = NewUIObject(name, canvas, pos, new Vector2(strana, strana));
+
+            var img = go.AddComponent<Image>();
+            PanelStyle.ApplyRoundedButton(img, PanelStyle.RadiusButton, PanelStyle.Neutral);
+
+            var btn = go.AddComponent<Button>();
+            btn.targetGraphic = img;
+
+            if (icon != null)
+            {
+                var ikonaGo = NewUIObject("Ikona", (RectTransform)go.transform, Vector2.zero,
+                    new Vector2(strana * 0.74f, strana * 0.74f));
+                var ikona = ikonaGo.AddComponent<Image>();
+                ikona.sprite = icon;
+                ikona.preserveAspect = true;
+                ikona.raycastTarget = false;
+                ikona.color = PanelStyle.TextPrimary;
+                return;
+            }
+
+            var textGo = NewUIObject("Label", (RectTransform)go.transform, Vector2.zero,
+                new Vector2(strana, strana - 6f));
             var tmp = textGo.AddComponent<TextMeshProUGUI>();
             tmp.text = label;
             tmp.fontSize = 12f;
             tmp.enableAutoSizing = true;
             tmp.fontSizeMin = 8f;
-            tmp.fontSizeMax = 14f;
+            tmp.fontSizeMax = 9.5f;
             tmp.alignment = TextAlignmentOptions.Center;
-            tmp.color = Color.white;
+            tmp.color = PanelStyle.TextPrimary;
             tmp.raycastTarget = false;
             if (font != null) tmp.font = font;
         }
@@ -417,7 +650,7 @@ namespace BP.Input
             tmp.fontSizeMax = 17f;
             tmp.fontStyle = FontStyles.Bold;
             tmp.alignment = TextAlignmentOptions.Center;
-            tmp.color = new Color(0.85f, 0.87f, 0.92f, 1f);
+            tmp.color = PanelStyle.Title;
             tmp.raycastTarget = false;
             if (font != null) tmp.font = font;
         }

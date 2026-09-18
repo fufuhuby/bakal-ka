@@ -10,18 +10,20 @@ namespace BP.Input
     {
         public readonly ShapeType Shape;
         public readonly PaletteColor Color;
+        public readonly ShapeSize Size;
 
         /// <summary>Time.realtimeSinceStartup v momentě potvrzení požadavku.</summary>
         public readonly float TimeStamp;
 
-        public ObjectRequest(ShapeType shape, PaletteColor color, float timeStamp)
+        public ObjectRequest(ShapeType shape, PaletteColor color, ShapeSize size, float timeStamp)
         {
             Shape = shape;
             Color = color;
+            Size = size;
             TimeStamp = timeStamp;
         }
 
-        public override string ToString() => $"{Color} {Shape}";
+        public override string ToString() => $"{ShapeSizes.Label(Size)} {Color} {Shape}";
     }
 
     /// <summary>

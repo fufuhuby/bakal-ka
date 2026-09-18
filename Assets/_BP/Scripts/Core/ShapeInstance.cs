@@ -12,6 +12,7 @@ namespace BP.Core
     {
         [SerializeField] private ShapeType shape;
         [SerializeField] private PaletteColor color;
+        [SerializeField] private ShapeSize size = ShapeSize.M;
 
         /// <summary>Ke kterému kroku šablony objekt patří. -1 = objekt navíc / mimo šablonu.</summary>
         [SerializeField] private int stepIndex = -1;
@@ -33,6 +34,7 @@ namespace BP.Core
 
         public ShapeType Shape => shape;
         public PaletteColor Color => color;
+        public ShapeSize Size => size;
         public int StepIndex => stepIndex;
 
         /// <summary>Byl objekt už vyhodnocen jako správně umístěný?</summary>
@@ -44,13 +46,19 @@ namespace BP.Core
         /// <summary>
         /// Nastavení identity při spawnu. Volá výhradně factory, ne uživatelský kód.
         /// </summary>
-        public void Initialize(ShapeType s, PaletteColor c, int step, Material material, float spawnTime)
+        public void Initialize(ShapeType s, PaletteColor c, ShapeSize sz, int step,
+            Material material, float spawnTime)
         {
             shape = s;
             color = c;
+            size = sz;
             stepIndex = step;
             SpawnTime = spawnTime;
             IsConfirmed = false;
+
+            // Velikost se aplikuje na objekt, ne na mesh — stejny prefab
+            // tak slouzi vsem trem velikostem a nemusi existovat trikrat.
+            transform.localScale = Vector3.one * ShapeSizes.Scale(sz);
 
             if (meshRenderer == null) meshRenderer = GetComponent<MeshRenderer>();
             if (meshRenderer != null && material != null) meshRenderer.sharedMaterial = material;
@@ -112,6 +120,11 @@ namespace BP.Core
         /// <summary>Odpovídá objekt zadanému tvaru a barvě?</summary>
         public bool Matches(ShapeType s, PaletteColor c) => shape == s && color == c;
 
-        public override string ToString() => $"{color} {shape} (krok {stepIndex + 1})";
+        /// <summary>Shoda včetně velikosti — používá validátor v třívlastnostním bloku.</summary>
+        public bool Matches(ShapeType s, PaletteColor c, ShapeSize sz)
+            => shape == s && color == c && size == sz;
+
+        public override string ToString()
+            => $"{ShapeSizes.Label(size)} {color} {shape} (krok {stepIndex + 1})";
     }
 }

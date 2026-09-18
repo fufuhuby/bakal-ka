@@ -31,6 +31,10 @@ namespace BP.Core
         [Tooltip("Velká hláška v pozadí. Čitelná periferně, bez otočení hlavy.")]
         [SerializeField] private StatusBanner banner;
 
+        [Tooltip("Plánek na vyžádání. Když je zapnutý, hláška o špatném " +
+                 "objektu SMÍ říct jen to, že je špatný — ne co je správně.")]
+        [SerializeField] private ReferenceOnDemand referenceOnDemand;
+
         [Tooltip("Jak často se kontroluje blízkost k cíli (sekundy). " +
                  "Nemusí to být každý frame.")]
         [SerializeField] private float snapCheckInterval = 0.06f;
@@ -98,21 +102,21 @@ namespace BP.Core
         private void OnTargetActivated(SecondaryTarget target)
         {
             if (menuPanel == null || !showSecondaryInstruction) return;
-            menuPanel.ShowNotice("TOUCH THE RED TARGET", true);
+            menuPanel.ShowNotice("DOTKNI SE ČERVENÉHO TERČE", true);
         }
 
         private void OnTargetHit(SecondaryTarget target, float reactionTime)
         {
-            if (banner != null) banner.ShowPositive("HIT");
+            if (banner != null) banner.ShowPositive("ZÁSAH");
             if (menuPanel == null || !showSecondaryInstruction) return;
-            menuPanel.ShowNotice("HIT  " + reactionTime.ToString("F2") + " s");
+            menuPanel.ShowNotice("ZÁSAH  " + reactionTime.ToString("F2") + " s");
         }
 
         private void OnTargetMissed(SecondaryTarget target)
         {
-            if (banner != null) banner.ShowNegative("MISS");
+            if (banner != null) banner.ShowNegative("POZDĚ");
             if (menuPanel == null || !showSecondaryInstruction) return;
-            menuPanel.ShowNotice("MISSED");
+            menuPanel.ShowNotice("POZDĚ");
         }
 
         private void Update()
@@ -187,18 +191,16 @@ namespace BP.Core
             // 3 mm od cíle se špatnou barvou — a ten pak marně zkoušel znovu
             // a znovu. Hláška je trvalá, protože je to stavový problém:
             // sama od sebe nezmizí, dokud objekt nezmizí.
-            if (!instance.Matches(expected.shape, expected.color))
+            if (!instance.Matches(expected.shape, expected.color, expected.size))
             {
-                menuPanel.ShowNotice(
-                    "WRONG OBJECT - STEP BACK, NEED " + expected.color + " " + expected.shape,
-                    true);
+                menuPanel.ShowNotice(HlaskaSpatnyObjekt(expected), true);
                 return;
             }
 
             if (distance <= template.positionTolerance * 3f)
-                menuPanel.ShowNotice("ALMOST - MOVE IT CLOSER");
+                menuPanel.ShowNotice("SKORO, PŘISUŇ BLÍŽ");
             else
-                menuPanel.ShowNotice("NOT IN PLACE - SEE HIGHLIGHTED STEP");
+                menuPanel.ShowNotice("NENÍ NA MÍSTĚ, KOUKNI NA ZVÝRAZNĚNÝ KROK");
         }
 
         private void OnWrongObject(ShapeInstance instance)
@@ -209,8 +211,31 @@ namespace BP.Core
             if (template == null || task.CurrentStep >= template.StepCount) return;
 
             var expected = template.GetStep(task.CurrentStep);
-            menuPanel.ShowNotice(
-                "WRONG OBJECT - STEP BACK, NEED " + expected.color + " " + expected.shape, true);
+            menuPanel.ShowNotice(HlaskaSpatnyObjekt(expected), true);
+        }
+
+        /// <summary>
+        /// Hláška o špatném objektu.
+        ///
+        /// PROČ SE V JEDNOM BLOKU NEDOŘÍKÁ: v bloku se skrytým plánkem se
+        /// měří, kolikrát si participant plánek vyžádá. Kdyby mu panel po
+        /// každé chybě sám napsal „má být červená kostka", je nejlevnější strategie
+        /// vytvořit cokoliv, přečíst si odpověď a plánek neotevřít vůbec —
+        /// a metrika odkrytí přestane měřit potřebu podívat se.
+        ///
+        /// V ostatních blocích plánek visí na očích, takže dořečená hláška
+        /// nic neprozrazuje a jen šetří hledání.
+        /// </summary>
+        private string HlaskaSpatnyObjekt(TemplateStep expected)
+        {
+            if (referenceOnDemand != null && referenceOnDemand.IsActive)
+                return "ŠPATNÝ OBJEKT, DEJ ZPĚT";
+
+            // Název se bere ze společného seznamu, aby hláška mluvila týmiž
+            // slovy jako okno s příkazy a jako povely, na které hlas slyší.
+            return "ŠPATNĚ, DEJ ZPĚT. MÁ BÝT "
+                   + (Nazvy.Barva(expected.color, expected.shape)
+                      + " " + Nazvy.Tvar(expected.shape)).ToUpperInvariant();
         }
 
         /// <summary>
@@ -236,7 +261,7 @@ namespace BP.Core
             var pending = task.PendingObject;
             var expected = template.GetStep(task.CurrentStep);
 
-            if (pending == null || pending.Matches(expected.shape, expected.color))
+            if (pending == null || pending.Matches(expected.shape, expected.color, expected.size))
                 menuPanel.ClearNotice();
         }
 
@@ -251,14 +276,14 @@ namespace BP.Core
         {
             // Banner nese krátká slova. Delší text by při této velikosti
             // přesáhl zorné pole — podrobnosti patří na panel menu.
-            if (banner != null) banner.ShowPositive("DONE");
+            if (banner != null) banner.ShowPositive("HOTOVO");
 
             if (menuPanel != null)
             {
                 var total = templateVisualizer.Template != null
                     ? templateVisualizer.Template.StepCount : 0;
                 menuPanel.SetProgress(total, total);
-                menuPanel.ShowNotice("BLOCK COMPLETE");
+                menuPanel.ShowNotice("BLOK HOTOV");
             }
 
             // Hotová struktura se celá potlačí, ať je vidět, že se nic nečeká.

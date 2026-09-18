@@ -138,8 +138,15 @@ namespace BP.Secondary
             // Válec má osu v Y; otočením o 90° kolem X se postaví čelem
             // ke směru pohledu. Terč míří +Z k hlavě, takže podložka jde
             // na záporné Z — jinak by kuličku zepředu zakryla.
-            backing.localPosition = new Vector3(0f, 0f, -0.022f);
+            //
+            // ODSTUP A TLOUŠŤKA JSOU ZÁMĚRNĚ ŠTĚDRÉ. Kulička je průhledná
+            // a nezapisuje hloubku; když za ní leží neprůhledná podložka
+            // těsně a je přitom skoro nulově tenká, obojí se pere o stejné
+            // pixely a projeví se to jako šedé problikávání. Odstup 6 mm
+            // a tloušťka 8 mm to vylučují s rezervou.
+            backing.localPosition = new Vector3(0f, 0f, -0.028f);
             backing.localRotation = Quaternion.Euler(90f, 0f, 0f);
+            backing.localScale = new Vector3(0.058f, 0.004f, 0.058f);
         }
 
         private Transform ResolveHead()

@@ -75,6 +75,7 @@ namespace BP.Secondary
         private float _activationTime;
         private float _windowEnd;
         private float _confirmedUntil;
+        private float _stateSince;
 
         private void Awake()
         {
@@ -173,9 +174,18 @@ namespace BP.Secondary
             return false;
         }
 
+        /// <summary>
+        /// Jak dlouho je terč v současném stavu. Slouží hlídači v manažeru:
+        /// stav s časovým limitem drží vlastní Update terče, a ten se
+        /// nevykonává, když je objekt skrytý — terč tak může v rozsvíceném
+        /// stavu uvíznout a zablokovat celou úlohu.
+        /// </summary>
+        public float TimeInState => Time.realtimeSinceStartup - _stateSince;
+
         private void ApplyState(TargetState state)
         {
             State = state;
+            _stateSince = Time.realtimeSinceStartup;
 
             if (_material == null) return;
 

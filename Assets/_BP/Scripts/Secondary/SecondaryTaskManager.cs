@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using BP.Logging;
 using UnityEngine;
+using UnityEngine.XR.Interaction.Toolkit.Interactors;
 
 namespace BP.Secondary
 {
@@ -54,7 +55,80 @@ namespace BP.Secondary
         [Tooltip("Nikdy neaktivovat dvakrát za sebou tentýž terč.")]
         [SerializeField] private bool avoidImmediateRepeat = true;
 
+        [Header("Dotykové body")]
+        [Tooltip("Dohledat dotykové body i za běhu podle toho, která modalita " +
+                 "je právě živá. Pevný seznam výše se opírá o serializované " +
+                 "odkazy, a když XRI během session přepne z ovladačů na ruce " +
+                 "(nebo naopak), může v něm zůstat jen neaktivní větev — " +
+                 "terče se pak rozsvěcují, ale nejde je trefit.")]
+        [SerializeField] private bool autoDiscoverTouchers = true;
+
         public bool IsRunning { get; private set; }
+
+        /// <summary>
+        /// Kolik terčů je ve hře. -1 = všechny. Tutoriál jich používá míň,
+        /// aby se participant neztratil v sedmi místech naráz.
+        ///
+        /// Terče mimo výběr se SKRYJÍ, ne jen vyřadí z losování — svítící
+        /// terč, na který se nesmí reagovat, by učil špatný návyk.
+        /// </summary>
+        public void SetActiveTargetCount(int count)
+        {
+            if (count < 0)
+            {
+                PouzitVyber(null);
+                return;
+            }
+
+            var vyber = new HashSet<int>();
+            for (var i = 0; i < count && i < targets.Length; i++) vyber.Add(i);
+            PouzitVyber(vyber);
+        }
+
+        /// <summary>
+        /// Nechá ve hře jen N nejníže položených terčů.
+        ///
+        /// PROČ ZROVNA SPODNÍ: v tutoriálu visí před participantem boxík
+        /// s instrukcí. Terče z horní části prstence se přes něj překrývají
+        /// a text přestane být čitelný zrovna ve chvíli, kdy podle něj má
+        /// jednat. Dole je volno. V měřených blocích se tohle nepoužívá —
+        /// tam musí být excentricita rozložená rovnoměrně kolem osy pohledu.
+        /// </summary>
+        public void SetActiveTargetsLowest(int count)
+        {
+            var poradi = new List<int>(targets.Length);
+            for (var i = 0; i < targets.Length; i++)
+                if (targets[i] != null) poradi.Add(i);
+
+            poradi.Sort((a, b) => targets[a].transform.position.y
+                .CompareTo(targets[b].transform.position.y));
+
+            var vyber = new HashSet<int>();
+            for (var i = 0; i < count && i < poradi.Count; i++) vyber.Add(poradi[i]);
+
+            PouzitVyber(vyber);
+        }
+
+        /// <summary>
+        /// Terče mimo výběr se SKRYJÍ, ne jen vyřadí z losování — svítící
+        /// terč, na který se nesmí reagovat, by učil špatný návyk.
+        /// </summary>
+        private void PouzitVyber(HashSet<int> vyber)
+        {
+            _activeSet = vyber;
+
+            for (var i = 0; i < targets.Length; i++)
+            {
+                if (targets[i] == null) continue;
+
+                var zapnuty = vyber == null || vyber.Contains(i);
+                if (!zapnuty) targets[i].ResetToIdle();
+                targets[i].gameObject.SetActive(zapnuty);
+            }
+        }
+
+        /// <summary>Indexy terčů ve hře. null = všechny.</summary>
+        private HashSet<int> _activeSet;
 
         // Souhrn za blok
         public int Activations { get; private set; }
@@ -79,17 +153,58 @@ namespace BP.Secondary
         private float _reactionTimeSum;
         private int _lastIndex = -1;
 
+        private readonly List<Transform> _effectiveTouchers = new List<Transform>();
+
         private void Awake()
         {
+            RefreshTouchers();
+
             for (var i = 0; i < targets.Length; i++)
             {
                 if (targets[i] == null) continue;
 
                 targets[i].Index = i;
-                targets[i].SetTouchers(touchers);
                 targets[i].Hit += OnHit;
                 targets[i].Missed += OnMissed;
             }
+        }
+
+        /// <summary>
+        /// Sestaví seznam dotykových bodů: pevně přiřazené plus ty, které
+        /// se najdou v rigu za běhu. Dohledávání je tu proto, že přiřazený
+        /// seznam odpovídá stavu při stavbě scény — ne tomu, co má
+        /// participant v ruce ve třetím bloku.
+        /// </summary>
+        private void RefreshTouchers()
+        {
+            _effectiveTouchers.Clear();
+
+            foreach (var t in touchers)
+                if (t != null) _effectiveTouchers.Add(t);
+
+            if (autoDiscoverTouchers)
+            {
+                // I neaktivní: aktivitu řeší až samotná kontrola dotyku,
+                // takže se seznam nemusí přestavovat při každém přepnutí.
+                foreach (var poke in FindObjectsByType<XRPokeInteractor>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                {
+                    var tr = poke.transform;
+                    if (!_effectiveTouchers.Contains(tr)) _effectiveTouchers.Add(tr);
+                }
+            }
+
+            var pole = _effectiveTouchers.ToArray();
+            foreach (var t in targets)
+                if (t != null) t.SetTouchers(pole);
+        }
+
+        /// <summary>Kolik dotykových bodů je právě teď živých.</summary>
+        private int CountLiveTouchers()
+        {
+            var n = 0;
+            foreach (var t in _effectiveTouchers)
+                if (t != null && t.gameObject.activeInHierarchy) n++;
+            return n;
         }
 
         private void OnDestroy()
@@ -104,11 +219,50 @@ namespace BP.Secondary
 
         private void Update()
         {
+            // Hlídač běží i mimo spuštěnou úlohu — terč se dá rozsvítit
+            // testovací klávesou, a takový terč by jinak nikdo neuvolnil.
+            ReleaseStuckTargets();
+
             if (!IsRunning) return;
             if (Time.realtimeSinceStartup < _nextActivation) return;
 
             ActivateRandomTarget();
             ScheduleNext();
+        }
+
+        /// <summary>
+        /// Uvolní terč, který zůstal viset v rozsvíceném nebo potvrzeném stavu.
+        ///
+        /// PROČ TO MUSÍ EXISTOVAT: časový limit terče řeší jeho vlastní Update,
+        /// a ten se nevykonává, když je objekt skrytý — mezi bloky se celé
+        /// pracoviště skrývá. Terč tak může uvíznout rozsvícený. A protože se
+        /// nikdy neaktivují dva terče zároveň, jeden uvíznutý terč zablokuje
+        /// VŠECHNY další aktivace na zbytek session. Chyba se pak projeví jako
+        /// „terče v dalších blocích přestaly fungovat".
+        ///
+        /// Uvolnění se loguje. Kdyby k tomu docházelo, je z logu vidět který
+        /// terč a jak dlouho visel — bez toho se to hledá naslepo.
+        /// </summary>
+        private void ReleaseStuckTargets()
+        {
+            var limit = responseWindow + 2f;
+
+            for (var i = 0; i < targets.Length; i++)
+            {
+                var t = targets[i];
+                if (t == null || t.State == TargetState.Idle) continue;
+                if (t.TimeInState <= limit) continue;
+
+                var stav = t.State;
+                t.ResetToIdle();
+
+                Debug.LogWarning("[SecondaryTaskManager] Terč " + i + " uvízl ve stavu "
+                                 + stav + " po " + t.TimeInState.ToString("F1")
+                                 + " s — uvolněn hlídačem.", this);
+
+                if (_logger != null)
+                    _logger.Log(LogEvent.Note, detail: "terc=" + i + " uvizl ve stavu " + stav);
+            }
         }
 
         /// <summary>Spustí sekundární úlohu. Volá TrialManager na začátku dual-task bloku.</summary>
@@ -124,6 +278,10 @@ namespace BP.Secondary
             _lastIndex = -1;
 
             foreach (var t in targets) if (t != null) t.ResetToIdle();
+
+            // Na zacatku bloku se seznam prestavi: participant muze mit
+            // v ruce neco jineho nez v bloku predchozim.
+            RefreshTouchers();
 
             _nextActivation = Time.realtimeSinceStartup + initialDelay;
             IsRunning = true;
@@ -180,6 +338,7 @@ namespace BP.Secondary
             var candidates = new List<int>(targets.Length);
             for (var i = 0; i < targets.Length; i++)
             {
+                if (_activeSet != null && !_activeSet.Contains(i)) continue;
                 if (targets[i] == null || targets[i].State != TargetState.Idle) continue;
                 if (avoidImmediateRepeat && i == _lastIndex && targets.Length > 1) continue;
                 candidates.Add(i);
@@ -191,10 +350,37 @@ namespace BP.Secondary
             _lastIndex = pick;
 
             targets[pick].Activate(responseWindow);
+
+            // Aktivace se pocita az podle skutecneho stavu terce. Activate()
+            // umi pozadavek odmitnout, a kdyby se pocitalo naslepo, rostl by
+            // jmenovatel hit rate o aktivace, ktere participant nikdy nevidel.
+            if (targets[pick].State != TargetState.Active) return;
+
             Activations++;
 
+            // Terc rozsviceny bez jedineho ziveho dotykoveho bodu se NEDA
+            // trefit. Bez tohohle zaznamu se to v datech jevi jako ztrata
+            // pozornosti, prestoze slo o poruchu vstupu - a hit rate by tim
+            // dostal posun, ktery nema nic spolecneho se zatezi.
+            var ziveBody = CountLiveTouchers();
+            if (ziveBody == 0)
+            {
+                RefreshTouchers();
+                ziveBody = CountLiveTouchers();
+            }
+
+            if (ziveBody == 0)
+            {
+                Debug.LogWarning("[SecondaryTaskManager] Terč " + pick + " se rozsvítil, ale " +
+                                 "není živý žádný dotykový bod — nedá se trefit.", this);
+
+                if (_logger != null)
+                    _logger.Log(LogEvent.Note, detail: "POZOR: zadny zivy dotykovy bod, terc=" + pick);
+            }
+
             if (_logger != null)
-                _logger.Log(LogEvent.SecondaryTargetActivated, detail: "terc=" + pick);
+                _logger.Log(LogEvent.SecondaryTargetActivated,
+                    detail: "terc=" + pick + " dotykovychBodu=" + ziveBody);
 
             if (TargetActivated != null) TargetActivated(targets[pick]);
         }

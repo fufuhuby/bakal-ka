@@ -14,6 +14,9 @@ namespace BP.Core
         public ShapeType shape;
         public PaletteColor color;
 
+        [Tooltip("Velikost tvaru. V dvouvlastnostním bloku je u všech kroků L.")]
+        public ShapeSize size;
+
         [Tooltip("Lokální pozice vůči kotvě šablony (metry).")]
         public Vector3 localPosition;
 
@@ -38,6 +41,10 @@ namespace BP.Core
 
         [Tooltip("K čemu šablona slouží — trénink, nebo měřený blok.")]
         public bool isTrainingTemplate;
+
+        [Tooltip("Řeší tato šablona i velikosti? Určuje, jestli menu nabídne " +
+                 "sloupec velikostí a jestli se v plánku ukazuje označení velikosti.")]
+        public bool usesSizes;
 
         [Header("Kroky")]
         [SerializeField]

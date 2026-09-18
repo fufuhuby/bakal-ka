@@ -14,45 +14,54 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::BP.Core.AssemblyTemplate
   templateId: T1
   isTrainingTemplate: 0
+  usesSizes: 0
   steps:
   - shape: 6
     color: 0
-    localPosition: {x: 0, y: 0.03, z: 0}
+    size: 1
+    localPosition: {x: 0, y: -0.141, z: 0}
     localEulerAngles: {x: 0, y: 0, z: 0}
     uniformScale: 1
   - shape: 5
     color: 1
-    localPosition: {x: 0, y: 0.09, z: 0}
+    size: 1
+    localPosition: {x: 0, y: -0.081, z: 0}
     localEulerAngles: {x: 0, y: 0, z: 0}
     uniformScale: 1
   - shape: 3
     color: 3
-    localPosition: {x: 0, y: 0.15, z: 0}
+    size: 1
+    localPosition: {x: 0, y: -0.020999998, z: 0}
     localEulerAngles: {x: 0, y: 0, z: 0}
     uniformScale: 1
   - shape: 2
     color: 4
-    localPosition: {x: 0, y: 0.21, z: 0}
+    size: 1
+    localPosition: {x: 0, y: 0.03899999, z: 0}
     localEulerAngles: {x: 0, y: 0, z: 0}
     uniformScale: 1
   - shape: 1
     color: 5
-    localPosition: {x: 0, y: 0.27, z: 0}
+    size: 1
+    localPosition: {x: 0, y: 0.09900001, z: 0}
     localEulerAngles: {x: 0, y: 0, z: 0}
     uniformScale: 1
   - shape: 0
     color: 6
-    localPosition: {x: 0, y: 0.312, z: 0}
+    size: 1
+    localPosition: {x: 0, y: 0.141, z: 0}
     localEulerAngles: {x: 0, y: 0, z: 0}
     uniformScale: 1
   - shape: 4
     color: 2
-    localPosition: {x: -0.065, y: 0.15, z: 0}
+    size: 1
+    localPosition: {x: -0.065, y: -0.020999998, z: 0}
     localEulerAngles: {x: 0, y: 0, z: 0}
     uniformScale: 1
   - shape: 4
     color: 2
-    localPosition: {x: 0.065, y: 0.15, z: 0}
+    size: 1
+    localPosition: {x: 0.065, y: -0.020999998, z: 0}
     localEulerAngles: {x: 0, y: 0, z: 0}
     uniformScale: 1
   positionTolerance: 0.025

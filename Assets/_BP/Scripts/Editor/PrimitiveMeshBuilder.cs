@@ -22,7 +22,13 @@ namespace BP.EditorTools
         private const float TargetSize = 0.06f;
 
         /// <summary>Segmenty po obvodu u kulatých tvarů.</summary>
-        private const int RadialSegments = 24;
+        /// <summary>
+        /// Dílků po obvodu. Rozhoduje o tom, jestli je na obrysu vidět
+        /// mnohoúhelník — stínování může být hladké, ale silueta je pořád
+        /// z úseček. Při 6 cm a pohledu z půl metru je 24 dílků na hraně
+        /// rozeznatelnosti, 32 už ne.
+        /// </summary>
+        private const int RadialSegments = 32;
 
         [MenuItem("BP/Generovat meshe tvaru")]
         public static void GenerateAll()
@@ -36,7 +42,7 @@ namespace BP.EditorTools
             // Tubus 0.40: silnější než původních 0.32, aby byl torus objemově
             // srovnatelný s ostatními tvary a stejně dobře uchopitelný.
             // Nad 0.50 se díra uzavře úplně (poloměr díry = 0.5 - tubeRatio).
-            Save("Shape_Torus", BuildTorus(RadialSegments, 16, 0.40f));
+            Save("Shape_Torus", BuildTorus(RadialSegments, 20, 0.40f));
             Save("Shape_Pyramid", BuildPyramid());
             Save("Shape_Octahedron", BuildOctahedron());
 
@@ -134,7 +140,9 @@ namespace BP.EditorTools
             var verts = new List<Vector3>();
             var tris = new List<int>();
 
-            AddQuad(verts, tris, d, c, b, a);
+            // Podstava musí koukat DOLŮ. Obrácené pořadí ji otočilo nahoru,
+            // takže se zespodu odřízla a do jehlanu bylo vidět skrz dno.
+            AddQuad(verts, tris, a, b, c, d);
             AddTri(verts, tris, a, b, apex);
             AddTri(verts, tris, b, c, apex);
             AddTri(verts, tris, c, d, apex);
@@ -194,8 +202,12 @@ namespace BP.EditorTools
                     var i1 = i0 + 1;
                     var i2 = i0 + lon + 1;
                     var i3 = i2 + 1;
-                    tris.Add(i0); tris.Add(i2); tris.Add(i1);
-                    tris.Add(i1); tris.Add(i2); tris.Add(i3);
+                    // POZOR NA POŘADÍ: tenhle pás měl vinutí obrácené proti
+                    // zbytku knihovny, takže RecalculateNormals() otočil
+                    // všechny normály dovnitř. Přední stěny se pak odřízly
+                    // a skrz povrch byla vidět vnitřní strana tělesa.
+                    tris.Add(i0); tris.Add(i1); tris.Add(i2);
+                    tris.Add(i1); tris.Add(i3); tris.Add(i2);
                 }
             }
 
@@ -235,15 +247,35 @@ namespace BP.EditorTools
             var verts = new List<Vector3>();
             var tris = new List<int>();
 
-            // Plášť: každý trojúhelník má vlastní vrchol, aby hrot nebyl rozmazaný
+            // PLÁŠŤ SDÍLÍ VRCHOLY PO OBVODU, hrot ne.
+            //
+            // Dřív měl každý trojúhelník pláště vlastní tři vrcholy, takže
+            // RecalculateNormals nemělo co průměrovat a kužel byl fazetovaný
+            // jako broušený kámen. Když se prstenec u podstavy sdílí, normála
+            // v každém jeho vrcholu vyjde jako průměr obou sousedních stěn
+            // a plášť se stíní plynule.
+            //
+            // Hrot zůstává rozdělený: v jediném bodě se sbíhají všechny stěny
+            // a jejich průměrná normála míří rovnou vzhůru, což by špičku
+            // rozmazalo do kulata.
+            var prstenec = verts.Count;
+
             for (var i = 0; i < seg; i++)
             {
-                var t0 = 2f * Mathf.PI * i / seg;
-                var t1 = 2f * Mathf.PI * (i + 1) / seg;
-                AddTri(verts, tris,
-                    new Vector3(Mathf.Cos(t0) * 0.5f, -0.5f, Mathf.Sin(t0) * 0.5f),
-                    new Vector3(Mathf.Cos(t1) * 0.5f, -0.5f, Mathf.Sin(t1) * 0.5f),
-                    new Vector3(0f, 0.5f, 0f));
+                var t = 2f * Mathf.PI * i / seg;
+                verts.Add(new Vector3(Mathf.Cos(t) * 0.5f, -0.5f, Mathf.Sin(t) * 0.5f));
+            }
+
+            for (var i = 0; i < seg; i++)
+            {
+                var a = prstenec + i;
+                var b = prstenec + (i + 1) % seg;
+
+                var hrot = verts.Count;
+                verts.Add(new Vector3(0f, 0.5f, 0f));
+
+                // Pořadí odpovídá tomu, jak vinula AddTri(b0, b1, vrchol).
+                tris.Add(a); tris.Add(hrot); tris.Add(b);
             }
 
             AddCap(verts, tris, seg, -0.5f, false);
@@ -278,8 +310,12 @@ namespace BP.EditorTools
                     var i1 = i0 + 1;
                     var i2 = i0 + minor + 1;
                     var i3 = i2 + 1;
-                    tris.Add(i0); tris.Add(i2); tris.Add(i1);
-                    tris.Add(i1); tris.Add(i2); tris.Add(i3);
+                    // POZOR NA POŘADÍ: tenhle pás měl vinutí obrácené proti
+                    // zbytku knihovny, takže RecalculateNormals() otočil
+                    // všechny normály dovnitř. Přední stěny se pak odřízly
+                    // a skrz povrch byla vidět vnitřní strana tělesa.
+                    tris.Add(i0); tris.Add(i1); tris.Add(i2);
+                    tris.Add(i1); tris.Add(i3); tris.Add(i2);
                 }
             }
 

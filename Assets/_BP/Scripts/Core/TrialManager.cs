@@ -24,6 +24,11 @@ namespace BP.Core
         [Tooltip("Tréninkový blok se do analýzy nezahrnuje, ale loguje se taky.")]
         public bool isTraining;
 
+        [Tooltip("Předloha je skrytá a odkrývá se jen na vyžádání tlačítkem. " +
+                 "Manipulace patří na BLOK, ne na šablonu — šablona popisuje " +
+                 "strukturu, tohle je způsob, jakým se k ní participant dostává.")]
+        public bool referenceOnDemand;
+
         public override string ToString()
             => $"{condition}/{load}/{(template != null ? template.templateId : "?")}"
                + (isTraining ? " (trenink)" : "");
@@ -45,6 +50,9 @@ namespace BP.Core
         public LoadCondition load;
         public string templateId;
         public bool isTraining;
+
+        /// <summary>Řešil blok i velikosti? Odlišuje druhý blok od prvního.</summary>
+        public bool usesSizes;
         public string reason;
 
         public float rawTime;
@@ -61,6 +69,10 @@ namespace BP.Core
         public int hits;
         public float hitRate;
         public float meanReactionTime;
+
+        public bool referenceOnDemand;
+        public int revealCount;
+        public float revealTime;
     }
 
     /// <summary>
@@ -77,9 +89,21 @@ namespace BP.Core
         public string soubor;
         public string datum;
 
+        /// <summary>
+        /// Hlasová, nebo klasická. Session je vždycky jen jedna podmínka —
+        /// druhá se hraje zvlášť — takže se dá vzít z prvního měřeného bloku.
+        /// </summary>
+        public InteractionCondition condition;
+
         public float cleanTime;
         public float penaltyTime;
         public int penaltyCount;
+
+        /// <summary>
+        /// Kolikrát participant vytvořil objekt, který do předlohy nepatřil —
+        /// špatný tvar, barva nebo velikost. Sčítá se přes měřené bloky.
+        /// </summary>
+        public int wrongObjects;
         public float TotalTime => cleanTime + penaltyTime;
 
         public int measuredBlocks;
@@ -117,6 +141,19 @@ namespace BP.Core
         [Tooltip("Bloky v základním pořadí. Counterbalancing je přeskládá podle skupiny.")]
         [SerializeField] private List<BlockDefinition> blocks = new List<BlockDefinition>();
 
+        [Tooltip("Tutoriál z hlavního menu. Běží jako blok, ale do výsledků " +
+                 "ani do pořadí session nevstupuje — je to nácvik ovládání, " +
+                 "ne měření.")]
+        [SerializeField] private BlockDefinition tutorialBlock;
+
+        [Tooltip("Tutoriál hlasové verze. Musí mít condition = Voice, jinak by " +
+                 "se v něm ukázal inventář místo okna s příkazy.")]
+        [SerializeField] private BlockDefinition voiceTutorialBlock;
+
+        [Tooltip("Kolik terčů je v tutoriálu ve hře. Sedm najednou je pro " +
+                 "první seznámení moc.")]
+        [SerializeField] private int tutorialTargetCount = 3;
+
         [Header("Úlohy")]
         [SerializeField] private AssemblyTaskController task;
         [SerializeField] private SecondaryTaskManager secondaryTask;
@@ -135,12 +172,28 @@ namespace BP.Core
         [Header("Vstupní zdroje podmínek")]
         [SerializeField] private MenuRequestSource menuSource;
 
-        [Tooltip("Zdroj pro hlasovou podmínku. Zatím neimplementován.")]
-        [SerializeField] private MonoBehaviour voiceSource;
+        [Tooltip("Zdroj pro hlasovou podmínku — mikrofon, Whisper, rozbor " +
+                 "českého povelu.")]
+        [SerializeField] private VoiceRequestSource voiceSource;
+
+        [Tooltip("Kořen inventáře (MenuAnchor). V HLASOVÉM bloku se schová — " +
+                 "kdyby zůstal, mohl by z něj participant objekt naklepat " +
+                 "rukou a podmínky by se přestaly lišit v tom jediném, v čem " +
+                 "se lišit mají.")]
+        [SerializeField] private GameObject menuRoot;
+
+        [Tooltip("Okno s hlasovými příkazy. Stojí na místě inventáře a nahrazuje " +
+                 "jeho roli nápovědy — bez něj by si participant musel slovník " +
+                 "pamatovat a rozdíl mezi podmínkami by zčásti měřil paměť.")]
+        [SerializeField] private VoiceHelpPanel voiceHelp;
 
         [Header("Kalibrace")]
         [Tooltip("Zámek pozice menu. Během bloku se zamkne, mezi bloky odemkne.")]
         [SerializeField] private MenuDragHandle menuLock;
+
+        [Tooltip("Totéž pro okno s hlasovými příkazy. Obě podmínky musí mít " +
+                 "rozhraní během měření stejně pevně na místě.")]
+        [SerializeField] private MenuDragHandle voiceHelpLock;
 
         [Tooltip("Zamykat menu v měřených blocích. Při MĚŘENÍ nechat zapnuté — " +
                  "posouvání během bloku mění vzdálenost ruky k menu a ta se " +
@@ -154,8 +207,10 @@ namespace BP.Core
         [SerializeField] private GameObject[] hiddenUntilStart = System.Array.Empty<GameObject>();
 
         [Header("Ovládání operátorem")]
-        [Tooltip("N = další blok, K = ukončit, R = zopakovat, " +
-                 "L = zamknout/odemknout menu, C = přecentrovat pracoviště.")]
+        [Tooltip("1 = klasická session, 2 = hlasová session, N = další blok, " +
+                 "K = ukončit, R = zopakovat, L = zamknout/odemknout menu, " +
+                 "C = přecentrovat pracoviště, T = rozsvítit terč, " +
+                 "S = zapnout/vypnout sekundární úlohu.")]
         [SerializeField] private bool keyboardControl = true;
 
         [Tooltip("Pracoviště. Umožní ho přecentrovat před participanta klávesou C.")]
@@ -165,6 +220,10 @@ namespace BP.Core
                  "rozloží znovu — excentricita se počítá od skutečné výšky " +
                  "očí, a ta je u každého participanta jiná.")]
         [SerializeField] private SecondaryTargetLayout targetLayout;
+
+        [Tooltip("Předloha na vyžádání. Zapíná se per blok příznakem " +
+                 "referenceOnDemand.")]
+        [SerializeField] private ReferenceOnDemand referenceOnDemand;
 
         [Tooltip("Ovládat i tlačítky na ovladačích. Nutné, když testuješ sám " +
                  "v headsetu — na klávesnici se nedosáhne. Při měření " +
@@ -191,12 +250,35 @@ namespace BP.Core
         public event Action<BlockDefinition, int> BlockEnded;
         public event Action SessionEnded;
 
+        /// <summary>Tutoriál skončil — menu se má vrátit na úvodní obrazovku.</summary>
+        public event Action TutorialEnded;
+
+        /// <summary>Běží právě tutoriál, ne měřený blok?</summary>
+        public bool TutorialRunning { get; private set; }
+
         /// <summary>Odehrané bloky v pořadí, v jakém proběhly.</summary>
         public IReadOnlyList<BlockResult> Results => _results;
+
+        /// <summary>Kolik bloků má session celkem — pro zobrazení postupu.</summary>
+        public int BlockCount
+        {
+            get
+            {
+                if (_order.Count == 0) BuildOrder();
+                return _order.Count;
+            }
+        }
 
         private readonly List<BlockDefinition> _order = new List<BlockDefinition>();
         private readonly List<BlockResult> _results = new List<BlockResult>();
         private TrialLogger _logger;
+
+        /// <summary>
+        /// Otevřený log běžícího bloku, nebo null. Čte to zpětná vazba, aby
+        /// si do dat zapsala, v jaké verzi ozvučení session běžela — bez toho
+        /// by u starších souborů nešlo poznat, jestli měl participant zvuk.
+        /// </summary>
+        public TrialLogger Logger => _logger;
 
         // Chyby se počítají tady, ne v úloze — úloha je bez stavu mezi bloky
         // a čítač v ní by se musel resetovat zvenčí, což je snadné zapomenout.
@@ -214,6 +296,7 @@ namespace BP.Core
         private void Awake()
         {
             BuildOrder();
+            NapojitHlas();
         }
 
         private void OnEnable()
@@ -279,6 +362,12 @@ namespace BP.Core
             var kb = Keyboard.current;
             if (kb == null) return;
 
+            // Spuštění session z klávesnice. V editoru se na tlačítka v nabídce
+            // bez brýlí nedá kliknout — hlasovou verzi by tam jinak nešlo
+            // vyzkoušet jinak než voláním z kódu.
+            if (kb.digit1Key.wasPressedThisFrame) StartSession(SessionMode.Classic);
+            if (kb.digit2Key.wasPressedThisFrame) StartSession(SessionMode.Voice);
+
             if (kb.nKey.wasPressedThisFrame) StartNextBlock();
             if (kb.kKey.wasPressedThisFrame) EndCurrentBlock("ukonceno operatorem");
             if (kb.rKey.wasPressedThisFrame) RepeatCurrentBlock();
@@ -291,6 +380,114 @@ namespace BP.Core
             // Zkoušení sekundární úlohy mimo dual-task blok.
             if (kb.tKey.wasPressedThisFrame) TriggerSecondaryTargetForTesting();
             if (kb.sKey.wasPressedThisFrame) ToggleSecondaryTaskForTesting();
+        }
+
+        /// <summary>
+        /// Ukáže to rozhraní, které k podmínce patří, a schová to druhé.
+        ///
+        /// Menu a okno s příkazy se VYLUČUJÍ. Kdyby byl v hlasovém bloku vidět
+        /// inventář, dal by se objekt vytvořit klepnutím a podmínka by přestala
+        /// být hlasová; kdyby v klasickém bloku viselo okno s příkazy, mátlo by,
+        /// protože mluvit tam nejde.
+        /// </summary>
+        private void PrepnoutRozhrani(BlockDefinition block)
+        {
+            var hlas = block.condition == InteractionCondition.Voice;
+
+            if (menuRoot != null) menuRoot.SetActive(!hlas);
+
+            // Vstup do menu se zamyká i tak. Skrytý objekt sice klepnout nejde,
+            // ale kdyby se někdy zobrazoval z jiného důvodu, nesmí do dat
+            // propustit požadavek z nesprávné podmínky.
+            if (menuSource != null) menuSource.SetInputEnabled(!hlas);
+
+            // Obě podmínky musí o velikostech vědět totéž, jinak by hlas
+            // v bloku bez velikostí propustil požadavek, který menu vyrobit
+            // nemůže.
+            var sVelikostmi = block.template != null && block.template.usesSizes;
+            if (voiceSource != null) voiceSource.SetRequiresSize(sVelikostmi);
+
+            if (voiceHelp == null) return;
+
+            voiceHelp.Configure(sVelikostmi, block.referenceOnDemand);
+            voiceHelp.SetVisible(hlas);
+        }
+
+        /// <summary>
+        /// Napojí hlasové vyžádání plánku. Dělá se to jednou, ne při každém
+        /// bloku — opakované přihlašování by událost spustilo tolikrát,
+        /// kolikrát blok začal, a jedno vyslovení by odkrylo plánek víckrát.
+        /// </summary>
+        private void NapojitHlas()
+        {
+            if (voiceSource == null || _hlasNapojen) return;
+
+            voiceSource.RevealRequested += OnVoiceReveal;
+            _hlasNapojen = true;
+        }
+
+        private bool _hlasNapojen;
+
+        /// <summary>Který z tutoriálů právě běží. Terče z něj berou seed.</summary>
+        private BlockDefinition _tutorialBlok;
+
+        private void OnVoiceReveal()
+        {
+            if (referenceOnDemand != null) referenceOnDemand.Reveal();
+        }
+
+        // ---- Režim session ----
+
+        /// <summary>
+        /// Co se z nabídky spustilo. Klasika a hlas se měří ZVLÁŠŤ, tedy jako
+        /// dvě samostatné session, ne jako dvě poloviny jedné.
+        ///
+        /// PROČ NE JEDNA SESSION S OBĚMA PODMÍNKAMI: dohromady by to byl
+        /// víc než dvacetiminutový běh v brýlích a únava by se přičetla
+        /// k druhé podmínce v pořadí. Rozdělené session se dají odehrát
+        /// s pauzou a pořadí se vyváží mezi participanty tím, koho pustíš
+        /// nejdřív na kterou.
+        /// </summary>
+        public enum SessionMode
+        {
+            /// <summary>Jen bloky s ovládáním přes menu.</summary>
+            Classic = 0,
+
+            /// <summary>Jen bloky s hlasovým ovládáním.</summary>
+            Voice = 1,
+
+            /// <summary>Obojí za sebou. Pro vyvážený běh, až na to dojde.</summary>
+            Both = 2
+        }
+
+        [Header("Session")]
+        [Tooltip("Který režim se spustí, když session začne bez výběru " +
+                 "z nabídky (klávesou nebo z inspektoru).")]
+        [SerializeField] private SessionMode defaultMode = SessionMode.Classic;
+
+        /// <summary>Režim, ve kterém běží nebo naposledy běžela session.</summary>
+        public SessionMode Mode { get; private set; }
+
+        /// <summary>
+        /// Spustí session v daném režimu od začátku. Volá nabídka.
+        /// </summary>
+        public void StartSession(SessionMode mode)
+        {
+            if (BlockRunning)
+            {
+                Debug.LogWarning("[TrialManager] Blok už běží — session se nespouští znovu.");
+                return;
+            }
+
+            Mode = mode;
+            BuildOrder();
+
+            // Výsledky se musí vyprázdnit, jinak by tabulka na konci mísila
+            // bloky z klasické a hlasové session dohromady.
+            _results.Clear();
+
+            CurrentBlockIndex = -1;
+            StartNextBlock();
         }
 
         // ---- Pořadí bloků ----
@@ -315,6 +512,21 @@ namespace BP.Core
 
             SortSingleBeforeDual(menuBlocks);
             SortSingleBeforeDual(voiceBlocks);
+
+            // Režim rozhoduje, které bloky se do pořadí vůbec dostanou.
+            // Vyvažování uvnitř režimu se tím neruší — jen se netýká
+            // podmínky, která v téhle session neběží.
+            if (Mode == SessionMode.Classic)
+            {
+                _order.AddRange(menuBlocks);
+                return;
+            }
+
+            if (Mode == SessionMode.Voice)
+            {
+                _order.AddRange(voiceBlocks);
+                return;
+            }
 
             var menuFirst = counterbalanceGroup % 2 == 0;
 
@@ -427,12 +639,51 @@ namespace BP.Core
             Debug.Log("[TrialManager] Menu " + (newState ? "zamceno" : "odemceno"));
         }
 
-        public void StartSession()
+        /// <summary>Session ve výchozím režimu — klávesa, autostart, inspektor.</summary>
+        public void StartSession() => StartSession(defaultMode);
+
+        /// <summary>
+        /// Spustí tutoriál. Nemění index bloku ani seznam výsledků — po
+        /// dokončení se menu vrátí na úvodní obrazovku a session může začít
+        /// od začátku, jako by se nic nestalo.
+        /// </summary>
+        public void StartTutorial() => StartTutorial(false);
+
+        /// <summary>
+        /// Spustí tutoriál pro jednu z podmínek.
+        ///
+        /// OBĚ PODMÍNKY MAJÍ MÍT NÁCVIK. Kdyby ho měla jen jedna, měřil by
+        /// rozdíl mezi nimi zčásti to, že do druhé jde participant studený —
+        /// tedy první kontakt s nenacvičeným rozhraním, ne cenu modality.
+        /// </summary>
+        public void StartTutorial(bool hlasem)
         {
-            BuildOrder();
-            _results.Clear();
-            CurrentBlockIndex = -1;
-            StartNextBlock();
+            if (BlockRunning)
+            {
+                Debug.LogWarning("[TrialManager] Nejdřív ukonči běžící blok.");
+                return;
+            }
+
+            _tutorialBlok = hlasem ? voiceTutorialBlock : tutorialBlock;
+
+            if (_tutorialBlok.template == null)
+            {
+                Debug.LogError("[TrialManager] Tutoriál nemá šablonu ("
+                               + (hlasem ? "hlasový" : "klasický") + ").");
+                return;
+            }
+
+            TutorialRunning = true;
+            RunBlock(_tutorialBlok);
+
+            // Terče začínají VYPNUTÉ. Když naskočí hned, participant se učí
+            // vytvářet objekty a zároveň ho něco vyrušuje — obojí naráz se
+            // učí špatně. Zapne je průvodce, až stavbu vysvětlí.
+            if (secondaryTask != null)
+            {
+                secondaryTask.StopTask();
+                secondaryTask.SetActiveTargetCount(0);
+            }
         }
 
         public void StartNextBlock()
@@ -494,14 +745,26 @@ namespace BP.Core
 
             ClearScene();
 
-            // Terče se rozloží na začátku každého bloku. Participant se mezi
-            // bloky posune nebo si sedne a excentricita, kterou návrh drží
-            // konstantní, by tím přestala platit.
+            // Pracoviště se posadí před participanta na začátku KAŽDÉHO bloku.
+            // Přecentrování po startu scény se může minout (tracking hlavy
+            // ještě neběží) a participant se mezi bloky posune nebo si sedne.
+            // Blok začíná stiskem START, kdy se dívá na panel před sebou —
+            // to je jediný okamžik, kdy je jeho orientace spolehlivě známá.
+            if (workspace != null) workspace.RecenterToHead();
+
+            // Terče se rozloží AŽ POTOM. Excentricita se počítá od polohy
+            // hlavy, takže před přecentrováním by seděla na starou pozici.
             if (targetLayout != null) targetLayout.Apply();
 
             // Šablona bloku — vodítko i předloha. Předloha se přepisovala
             // dřív jen v editoru, takže od druhého bloku ukazovala jinou
             // strukturu, než se měla stavět.
+            // Vodítko nesmí prozradit identitu objektu v bloku, kde je plánek
+            // na vyžádání — jinak by se dalo stavět bez plánku a manipulace
+            // by byla prázdná. Váže se to na stejný příznak schválně: dvě
+            // nezávislá nastavení by se dala nastavit rozporně.
+            templateVisualizer.UseNeutralGuide = block.referenceOnDemand;
+
             templateVisualizer.SetTemplate(block.template);
             if (referenceVisualizer != null) referenceVisualizer.SetTemplate(block.template);
 
@@ -514,7 +777,16 @@ namespace BP.Core
             // Vstupní zdroj podle podmínky
             var source = block.condition == InteractionCondition.Menu
                 ? (IObjectRequestSource)menuSource
-                : voiceSource as IObjectRequestSource;
+                : voiceSource;
+
+            // Kolik vlastnosti blok resi, urcuje SABLONA — jeden zdroj pravdy.
+            // Kdyby to bylo zvlast na bloku, mohl by nastat rozpor: menu by
+            // velikost nabizelo a sablona ji neresila, nebo naopak.
+            if (menuSource != null) menuSource.SetRequiresSize(block.template.usesSizes);
+
+            // Hlas si loguje sám — přepis, doba rozpoznání i důvod odmítnutí
+            // jsou věci, které o sobě nikdo jiný neví.
+            if (voiceSource != null) voiceSource.SetLogger(_logger);
 
             task.Initialize(source, _logger);
             task.TaskCompleted += OnTaskCompleted;
@@ -527,8 +799,9 @@ namespace BP.Core
             // V TRÉNINKU zůstává menu odemčené — tam si ho participant narovná
             // do pohodlné pozice (kalibrace). V MĚŘENÉM bloku se zamkne, aby
             // byla vzdálenost ruky k menu po celou dobu měření konstantní.
-            if (menuLock != null)
-                menuLock.SetLocked(lockMenuDuringMeasuredBlocks && !block.isTraining);
+            var zamknout = lockMenuDuringMeasuredBlocks && !block.isTraining;
+            if (menuLock != null) menuLock.SetLocked(zamknout);
+            if (voiceHelpLock != null) voiceHelpLock.SetLocked(zamknout);
 
             // Sekundární úloha jen v dual-task bloku. Seed z participanta a bloku,
             // aby stejný participant dostal v obou podmínkách stejnou sekvenci.
@@ -543,6 +816,13 @@ namespace BP.Core
             }
 
             SetWorkspaceVisible(true);
+            PrepnoutRozhrani(block);
+
+            // AŽ POTOM, co je pracoviště vidět: zviditelnění by jinak
+            // předlohu zase odkrylo a mechanika by v prvním okamžiku selhala.
+            if (referenceOnDemand != null)
+                referenceOnDemand.Configure(_logger, block.referenceOnDemand,
+                    block.condition == InteractionCondition.Voice);
 
             if (timer != null) timer.StartBlock();
 
@@ -553,7 +833,35 @@ namespace BP.Core
             if (BlockStarted != null) BlockStarted(block, CurrentBlockIndex);
         }
 
-        private void OnTaskCompleted() => EndCurrentBlock("uloha dokoncena");
+        private void OnTaskCompleted()
+        {
+            // V tutoriálu dostavěním nic nekončí — po stavbě ještě přijde
+            // vysvětlení terčů. O ukončení rozhoduje průvodce.
+            if (TutorialRunning) return;
+
+            EndCurrentBlock("uloha dokoncena");
+        }
+
+        /// <summary>
+        /// Zapne terče uprostřed tutoriálu. Do té doby jsou vypnuté, aby
+        /// participanta nerozptylovaly, dokud se učí vytvářet objekty.
+        /// </summary>
+        public void EnableTutorialTargets()
+        {
+            if (secondaryTask == null) return;
+
+            secondaryTask.StartTask(_logger, ComputeSeed(_tutorialBlok));
+
+            // Spodní terče, aby se nepřekrývaly s boxíkem instrukce.
+            secondaryTask.SetActiveTargetsLowest(tutorialTargetCount);
+        }
+
+        /// <summary>Ukončí tutoriál. Volá průvodce, až projde všechny fáze.</summary>
+        public void FinishTutorial()
+        {
+            if (!TutorialRunning) return;
+            EndCurrentBlock("tutorial dokoncen");
+        }
 
         private void OnWrongObject(ShapeInstance instance) => _wrongObjects++;
 
@@ -588,15 +896,33 @@ namespace BP.Core
 
             var secondaryRan = secondaryTask != null && secondaryTask.IsRunning;
             if (secondaryRan)
-            {
                 summary += " | " + secondaryTask.GetSummary();
-                secondaryTask.StopTask();
+
+            // StopTask se volá BEZ OHLEDU na to, jestli úloha běžela. Terč
+            // rozsvícený mimo blok (testovací klávesou) by jinak zůstal
+            // svítit, a po skrytí pracoviště se jeho časový limit zastaví —
+            // zůstal by rozsvícený natrvalo a zablokoval by další aktivace.
+            if (secondaryTask != null) secondaryTask.StopTask();
+
+            var odkryti = 0;
+            var odkrytiCas = 0f;
+            if (referenceOnDemand != null && referenceOnDemand.IsActive)
+            {
+                summary += " | " + referenceOnDemand.GetSummary();
+                odkryti = referenceOnDemand.RevealCount;
+                odkrytiCas = referenceOnDemand.TotalRevealTime;
             }
+
+            // Vypnout vzdy: tlacitko nema co delat v bloku, ktery mechaniku
+            // neresi, a predloha se musi vratit do bezneho rezimu.
+            if (referenceOnDemand != null) referenceOnDemand.Configure(null, false);
+            if (voiceHelp != null) voiceHelp.SetVisible(false);
 
             if (_logger != null) _logger.CloseBlock(summary);
 
             // Mezi bloky se menu odemkne, aby si ho participant mohl narovnat.
             if (menuLock != null) menuLock.SetLocked(false);
+            if (voiceHelpLock != null) voiceHelpLock.SetLocked(false);
 
             var block = CurrentBlockIndex >= 0 && CurrentBlockIndex < _order.Count
                 ? _order[CurrentBlockIndex]
@@ -612,6 +938,19 @@ namespace BP.Core
             if (spawner != null) spawner.RemoveAll();
             SetWorkspaceVisible(false);
 
+            if (TutorialRunning)
+            {
+                // Tutoriál se do výsledků nezapisuje a index bloku nechává být.
+                // Terče se vrátí na plný počet, jinak by si omezení odnesl
+                // do prvního měřeného bloku.
+                TutorialRunning = false;
+                if (secondaryTask != null) secondaryTask.SetActiveTargetCount(-1);
+
+                Debug.Log("[TrialManager] Tutoriál ukončen: " + summary);
+                if (TutorialEnded != null) TutorialEnded();
+                return;
+            }
+
             _results.Add(new BlockResult
             {
                 index = CurrentBlockIndex,
@@ -619,6 +958,7 @@ namespace BP.Core
                 load = block.load,
                 templateId = block.template != null ? block.template.templateId : "?",
                 isTraining = block.isTraining,
+                usesSizes = block.template != null && block.template.usesSizes,
                 reason = reason,
 
                 rawTime = timer != null ? timer.RawTime : 0f,
@@ -634,7 +974,11 @@ namespace BP.Core
                 activations = secondaryTask != null ? secondaryTask.Activations : 0,
                 hits = secondaryTask != null ? secondaryTask.Hits : 0,
                 hitRate = secondaryTask != null ? secondaryTask.HitRate : 0f,
-                meanReactionTime = secondaryTask != null ? secondaryTask.MeanReactionTime : 0f
+                meanReactionTime = secondaryTask != null ? secondaryTask.MeanReactionTime : 0f,
+
+                referenceOnDemand = block.referenceOnDemand,
+                revealCount = odkryti,
+                revealTime = odkrytiCas
             });
 
             Debug.Log($"[TrialManager] Blok ukončen: {summary}");
@@ -676,31 +1020,50 @@ namespace BP.Core
         /// </summary>
         public string BuildResultsTable()
         {
-            if (_results.Count == 0) return "Žádné odehrané bloky.";
+            // TRÉNINK SE NEVYPISUJE. Do analýzy nejde a v tabulce jen mate:
+            // jeho čas je vždycky nejhorší, protože se člověk teprve učí,
+            // a participant si ho pak porovnává s měřenými bloky, jako by
+            // patřily k sobě. Do logu se samozřejmě zapisuje dál.
+            var merene = _results.FindAll(x => !x.isTraining);
+
+            if (merene.Count == 0) return "Žádné odehrané bloky.";
 
             var sb = new StringBuilder();
 
-            sb.Append(Pad("#", 5)).Append(Pad("Podmínka", 17)).Append(Pad("Čas", 11))
-              .Append(Pad("Chyby", 8)).Append(Pad("Terče", 9)).Append("RT")
+            // PODMÍNKA NENÍ SLOUPEC, ALE NADPIS. Klasika a hlas jsou dvě
+            // samostatné session, takže by ve všech řádcích stálo totéž.
+            // Sloupec navíc místo toho nese, ČÍM SE BLOKY LIŠÍ — bez toho
+            // vypadá první řádek nevysvětlitelně nejlepší, přestože v něm
+            // participant jenom stavěl a nic ho nerušilo.
+            sb.Append(Pad("Blok", 7)).Append(Pad("Úloha", 21)).Append(Pad("Čas", 11))
+              .Append(Pad("Chyby", 8)).Append(Pad("Terče", 9)).Append(Pad("Reakce", 10))
+              .Append("Plánek")
               .AppendLine();
 
-            sb.AppendLine(new string('-', 56));
+            sb.AppendLine(new string('-', 72));
 
-            foreach (var r in _results)
+            // Bloky se čísluji od jedné v rámci tabulky, ne podle pořadí
+            // v session — po vynechání tréninku by jinak začínala dvojkou.
+            for (var i = 0; i < merene.Count; i++)
             {
-                // Trénink je označený přímo ve sloupci podmínky. Dřív ho značila
-                // hvězdička u čísla, ale tu bylo nutné vysvětlit pod tabulkou —
-                // a tabulka má stát bez doprovodného textu.
-                var podminka = r.condition == InteractionCondition.Menu ? "Menu" : "Hlas";
-                if (r.isTraining) podminka += " (trénink)";
+                var r = merene[i];
 
-                sb.Append(Pad((r.index + 1).ToString(), 5))
-                  .Append(Pad(podminka, 17))
+                // ČÍM SE BLOK LIŠÍ OD PŘEDCHOZÍHO. První je holá stavba,
+                // druhý k ní přidává velikosti, třetí skrytý plánek. Bez toho
+                // vypadá první řádek nevysvětlitelně nejlepší, přestože v něm
+                // participant dělal ze všech bloků nejmíň.
+                var uloha = r.condition == InteractionCondition.Menu ? "klasická" : "hlasová";
+                if (r.usesSizes) uloha += " + velikost";
+                else if (r.referenceOnDemand) uloha += " + plánek";
+
+                sb.Append(Pad((i + 1).ToString(), 7))
+                  .Append(Pad(uloha, 21))
                   .Append(Pad(BlockTimer.Format(r.rawTime), 11))
                   .Append(Pad(r.wrongObjects.ToString(), 8))
                   .Append(Pad(r.secondaryRan ? r.hits + "/" + r.activations : "—", 9))
-                  .Append(r.secondaryRan && r.hits > 0
-                      ? r.meanReactionTime.ToString("F2") + "s" : "—")
+                  .Append(Pad(r.secondaryRan && r.hits > 0
+                      ? r.meanReactionTime.ToString("F2") + " s" : "—", 10))
+                  .Append(r.referenceOnDemand ? r.revealCount + "×" : "—")
                   .AppendLine();
             }
 
@@ -735,24 +1098,44 @@ namespace BP.Core
                 return vysledek;
             }
 
-            // Z kazdeho participanta jen jeho nejlepsi session — jinak by
-            // ten, kdo prisel dvakrat, obsadil zebricek sam.
-            var nejlepsi = new Dictionary<string, SessionScore>();
-            foreach (var s in vysledek)
-            {
-                var klic = s.participantId ?? "?";
-                SessionScore drivejsi;
-                if (!nejlepsi.TryGetValue(klic, out drivejsi) || s.TotalTime < drivejsi.TotalTime)
-                    nejlepsi[klic] = s;
-            }
-
             // Dokoncene napred. Nedokoncena session ma kratsi cas prave proto,
             // ze nebyla dokoncena, a jinak by se vyhoupla na spicku zebricku.
-            var seznam = new List<SessionScore>(nejlepsi.Values);
-            seznam.Sort((a, b) =>
+            Comparison<SessionScore> lepsi = (a, b) =>
             {
                 if (a.complete != b.complete) return a.complete ? -1 : 1;
                 return a.TotalTime.CompareTo(b.TotalTime);
+            };
+
+            // Z kazdeho participanta jen jeho nejlepsi session — jinak by
+            // ten, kdo prisel dvakrat, obsadil zebricek sam.
+            //
+            // VYBIRA SE STEJNYM PRAVIDLEM JAKO SE RADI, ne podle nejkratsiho
+            // casu. Pri porovnani jen casu vyhrala uvnitr participanta
+            // session, ktera se prerusila po par vterinach, a zastinila
+            // jeho dokoncene pokusy — v zebricku pak stal jediny radek
+            // "— P01 0:00,0", i kdyz mel ulozenych trinact dohranych session.
+            // KLIC JE PARTICIPANT A PODMINKA, ne jen participant. Hlasovou
+            // a klasickou verzi hraje tyz clovek ve dvou session; pri klici
+            // jen podle participanta by si jeho dva vysledky pretloukly
+            // a jeden by ze zebricku zmizel.
+            var nejlepsi = new Dictionary<string, SessionScore>();
+            foreach (var s in vysledek)
+            {
+                var klic = (s.participantId ?? "?") + "|" + s.condition;
+                SessionScore drivejsi;
+                if (!nejlepsi.TryGetValue(klic, out drivejsi) || lepsi(s, drivejsi) < 0)
+                    nejlepsi[klic] = s;
+            }
+
+            // RADI SE UVNITR PODMINKY, ne pres obe dohromady. Hlasova
+            // a klasicka verze jsou jina uloha; spolecne poradi by tvrdilo,
+            // ze je jeden cas lepsi nez druhy, i kdyz merí neco jineho —
+            // presne ten rozdil je pritom zkoumana promenna.
+            var seznam = new List<SessionScore>(nejlepsi.Values);
+            seznam.Sort((a, b) =>
+            {
+                if (a.condition != b.condition) return a.condition.CompareTo(b.condition);
+                return lepsi(a, b);
             });
             return seznam;
         }
@@ -777,9 +1160,16 @@ namespace BP.Core
                 if (p.Length < 17 || p[0] == "blok") continue;   // hlavicka
                 if (p[1] == "1") continue;                        // trenink se nepocita
 
+                // Podminka z prvniho mereneho bloku. Dal uz se nemeni —
+                // hlasova a klasicka verze jsou dve oddelene session.
+                if (s.measuredBlocks == 0)
+                    s.condition = p[2] == "Voice"
+                        ? InteractionCondition.Voice : InteractionCondition.Menu;
+
                 s.cleanTime += Cislo(p[5]);
                 s.penaltyCount += (int)Cislo(p[6]);
                 s.penaltyTime += Cislo(p[7]);
+                s.wrongObjects += (int)Cislo(p[10]);
                 s.activations += (int)Cislo(p[13]);
                 s.hits += (int)Cislo(p[14]);
                 s.measuredBlocks++;
@@ -808,29 +1198,47 @@ namespace BP.Core
 
             var sb = new StringBuilder();
 
-            sb.Append(Pad("#", 4)).Append(Pad("Participant", 13)).Append(Pad("Celkem", 10))
-              .Append(Pad("Čistý čas", 12)).Append(Pad("Postihy", 9)).Append("Terče")
+            sb.Append(Pad("#", 4)).Append(Pad("Úloha", 11)).Append(Pad("Participant", 13))
+              .Append(Pad("Celkem", 10)).Append(Pad("Chyby", 8)).Append(Pad("Postihy", 9))
+              .Append("Terče")
               .AppendLine();
 
-            sb.AppendLine(new string('-', 53));
+            sb.AppendLine(new string('-', 60));
 
+            // Poradi se pocita ZVLAST PRO KAZDOU PODMINKU, protoze se v ni
+            // taky zvlast radilo. Prubezne cislovani pres celou tabulku by
+            // druhou skupinu zacalo treba petkou a vypadalo by to, ze jsou
+            // obe podminky v jednom poradi.
             var poradi = 0;
             var ukazano = 0;
+            var predchozi = (InteractionCondition?)null;
 
             foreach (var s2 in vse)
             {
                 if (ukazano++ >= limit) break;
+
+                if (predchozi != s2.condition)
+                {
+                    // Prazdny radek mezi podminkami. Bez nej vypada tabulka
+                    // jako jedno poradi, ve kterem se dvakrat zacina jednickou.
+                    if (predchozi != null) sb.AppendLine();
+                    predchozi = s2.condition;
+                    poradi = 0;
+                }
 
                 // Nedokončená session dostane pomlčku místo pořadí. Krátký čas
                 // má právě proto, že nebyla dokončena, takže by jinak vyhrála.
                 var znacka = s2.complete ? (++poradi) + "." : "—";
 
                 sb.Append(Pad(znacka, 4))
+                  .Append(Pad(s2.condition == InteractionCondition.Voice
+                      ? "hlasová" : "klasická", 11))
                   .Append(Pad(s2.participantId ?? "?", 13))
                   .Append(Pad(BlockTimer.Format(s2.TotalTime), 10))
-                  .Append(Pad(BlockTimer.Format(s2.cleanTime), 12))
+                  .Append(Pad(s2.wrongObjects + "×", 8))
                   .Append(Pad(s2.penaltyCount + "×", 9))
-                  .Append(s2.activations > 0 ? Mathf.RoundToInt(s2.HitRate * 100f) + "%" : "—")
+                  .Append(s2.activations > 0
+                      ? Mathf.RoundToInt(s2.HitRate * 100f) + "%" : "—")
                   .AppendLine();
             }
 
@@ -871,6 +1279,7 @@ namespace BP.Core
                     "cisty_cas_s", "postihu", "postih_s",
                     "kroku_hotovo", "kroku_celkem", "spatnych_objektu", "odmitnutych_pokladek",
                     "sekundarni_bezela", "aktivaci", "zasahu", "hit_rate", "prum_rt_s",
+                    "predloha_na_vyzadani", "odkryti", "odkryti_s",
                     "ukonceni"));
 
                 foreach (var r in _results)
@@ -893,6 +1302,9 @@ namespace BP.Core
                         r.hits.ToString(CultureInfo.InvariantCulture),
                         r.hitRate.ToString("F3", CultureInfo.InvariantCulture),
                         r.meanReactionTime.ToString("F3", CultureInfo.InvariantCulture),
+                        r.referenceOnDemand ? "1" : "0",
+                        r.revealCount.ToString(CultureInfo.InvariantCulture),
+                        r.revealTime.ToString("F1", CultureInfo.InvariantCulture),
                         r.reason));
                 }
 

@@ -1,4 +1,6 @@
+using System.Collections;
 using UnityEngine;
+using UnityEngine.XR;
 
 namespace BP.Core
 {
@@ -33,6 +35,10 @@ namespace BP.Core
                  "operátor to udělá až když participant stojí, jak má.")]
         [SerializeField] private bool recenterOnStart = true;
 
+        [Tooltip("Jak dlouho se čeká na platnou polohu hlavy, než se " +
+                 "přecentruje naslepo (sekundy).")]
+        [SerializeField] private float trackingTimeout = 5f;
+
         private Vector3 _originalPosition;
         private Quaternion _originalRotation;
 
@@ -46,7 +52,52 @@ namespace BP.Core
 
         private void Start()
         {
-            if (recenterOnStart) RecenterToHead();
+            if (recenterOnStart) StartCoroutine(RecenterWhenHeadIsTracked());
+        }
+
+        /// <summary>
+        /// Počká, než headset začne hlásit platnou polohu hlavy, a teprve pak
+        /// přecentruje.
+        ///
+        /// PROČ TO NEJDE HNED VE START(): v okamžiku, kdy se scéna spustí,
+        /// ještě XR obvykle nedodává polohu hlavy — kamera sedí v počátku nebo
+        /// drží pozici z předchozího snímku. Přecentrování podle takové polohy
+        /// posadí celé pracoviště mimo participanta a projeví se to nahodile:
+        /// když se tracking náhodou stihne, je to dobře, jinak ne.
+        /// </summary>
+        private IEnumerator RecenterWhenHeadIsTracked()
+        {
+            var konec = Time.realtimeSinceStartup + trackingTimeout;
+
+            while (Time.realtimeSinceStartup < konec)
+            {
+                if (IsHeadTracked())
+                {
+                    // Jeden snímek navíc: první platná poloha bývá ještě
+                    // nedotažená, než se ustálí filtrování.
+                    yield return null;
+                    RecenterToHead();
+                    yield break;
+                }
+                yield return null;
+            }
+
+            // Bez headsetu (editor, testy) se přecentruje podle toho, co je —
+            // lepší než nechat pracoviště na náhodném místě ze scény.
+            Debug.LogWarning("[WorkspaceLayout] Poloha hlavy se do " + trackingTimeout
+                             + " s nepřihlásila — přecentrováno podle současné kamery.", this);
+            RecenterToHead();
+        }
+
+        private static bool IsHeadTracked()
+        {
+            var hlava = InputDevices.GetDeviceAtXRNode(XRNode.CenterEye);
+            if (!hlava.isValid) return false;
+
+            bool sledovana;
+            if (!hlava.TryGetFeatureValue(CommonUsages.isTracked, out sledovana)) return false;
+
+            return sledovana;
         }
 
         /// <summary>

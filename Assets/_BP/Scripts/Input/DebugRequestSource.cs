@@ -84,7 +84,7 @@ namespace BP.Input
         {
             TemplateStep step;
             if (!TryGetCurrentStep(out step)) return;
-            Emit(step.shape, step.color);
+            Emit(step.shape, step.color, step.size);
         }
 
         /// <summary>
@@ -98,7 +98,7 @@ namespace BP.Input
 
             var shape = (ShapeType)(((int)step.shape + 1) % Enum.GetValues(typeof(ShapeType)).Length);
             var color = (PaletteColor)(((int)step.color + 1) % Enum.GetValues(typeof(PaletteColor)).Length);
-            Emit(shape, color);
+            Emit(shape, color, step.size);
         }
 
         public void RequestUndo()
@@ -122,10 +122,10 @@ namespace BP.Input
             return true;
         }
 
-        private void Emit(ShapeType shape, PaletteColor color)
+        private void Emit(ShapeType shape, PaletteColor color, ShapeSize size)
         {
             if (ObjectRequested != null)
-                ObjectRequested(new ObjectRequest(shape, color, Time.realtimeSinceStartup));
+                ObjectRequested(new ObjectRequest(shape, color, size, Time.realtimeSinceStartup));
         }
     }
 }

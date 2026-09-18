@@ -41,6 +41,14 @@ namespace BP.Core
         [SerializeField] private ShapeEntry[] shapes = Array.Empty<ShapeEntry>();
         [SerializeField] private ColorEntry[] colors = Array.Empty<ColorEntry>();
 
+        [Header("Velikosti")]
+        [Tooltip("Stupnice velikosti v pořadí S, M, L. Tři čtverečky, z nichž " +
+                 "je zvýrazněný ten, o kterou velikost jde. Čte to menu, okno " +
+                 "s hlasovými povely i odznak u plánku — proto to leží tady " +
+                 "a ne v každé z těch tří komponent zvlášť. Kdyby se rozešly, " +
+                 "znamenal by týž obrázek v každé podmínce něco jiného.")]
+        [SerializeField] private Sprite[] sizeIcons = Array.Empty<Sprite>();
+
         [Header("Ghost / preview")]
         [Tooltip("Průhledný materiál se světlými konturami pro náhled (skica b2).")]
         public Material ghostMaterial;
@@ -73,6 +81,18 @@ namespace BP.Core
             foreach (var e in shapes)
                 if (e.shape == shape) return e.icon;
             return null;
+        }
+
+        /// <summary>
+        /// Stupnice pro danou velikost, nebo null, když ikony nejsou nastavené.
+        /// Volající si v tom případě vykreslí písmeno jako dřív — nastavení
+        /// ikon je zlepšení čitelnosti, ne podmínka běhu.
+        /// </summary>
+        public Sprite GetSizeIcon(ShapeSize size)
+        {
+            var poradi = (int)size;
+            if (sizeIcons == null || poradi < 0 || poradi >= sizeIcons.Length) return null;
+            return sizeIcons[poradi];
         }
 
         public Material GetMaterial(PaletteColor color)

@@ -63,5 +63,9 @@ MonoBehaviour:
   - color: 6
     solidMaterial: {fileID: 2100000, guid: 562eaec7ce621dd45b6cec1daa742b99, type: 2}
     displayColor: {r: 1, g: 0.45, b: 0.82, a: 1}
+  sizeIcons:
+  - {fileID: 21300000, guid: eb3b7658047730e42bfd5fe043f07809, type: 3}
+  - {fileID: 21300000, guid: 120354d6c1c3d6a44ac6e5765e7b5924, type: 3}
+  - {fileID: 21300000, guid: f8820fc2bd195774b991c27e4a9975b1, type: 3}
   ghostMaterial: {fileID: 2100000, guid: 134365b449123a3439f30472bf3dbfeb, type: 2}
   templateMaterial: {fileID: 2100000, guid: 8509b356ffc141b4db90ceacfd309e48, type: 2}

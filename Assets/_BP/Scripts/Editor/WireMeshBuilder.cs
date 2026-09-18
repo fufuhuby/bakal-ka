@@ -38,19 +38,46 @@ namespace BP.EditorTools
             Save(ShapeType.Cube, Coarse.Cube());
             Save(ShapeType.Pyramid, Coarse.Pyramid());
             Save(ShapeType.Octahedron, Coarse.Octahedron());
-            Save(ShapeType.Cylinder, Coarse.Cylinder(10));
-            Save(ShapeType.Cone, Coarse.Cone(10));
-            Save(ShapeType.Sphere, Coarse.Sphere(10, 6));
-            Save(ShapeType.Torus, Coarse.Torus(12, 6, 0.40f));
+            // Osm spojnic. Čtyři stačily na to, aby byl tvar poznat, ale
+            // plášť pak působil prázdně vedle koule a torusu, které mají čar
+            // víc. Kruhy jsou na počtu spojnic nezávislé, takže je zahuštění
+            // nijak nezhrubne.
+            Save(ShapeType.Cylinder, Coarse.Cylinder(8));
+            Save(ShapeType.Cone, Coarse.Cone(8));
+
+            // MÉNĚ SEGMENTŮ, NEŽ BY SE ZDÁLO. Koule i torus byly při dvanácti
+            // a deseti dílcích na šesti centimetrech jen změť čar — drát je
+            // silný 1,8 mm, takže se sousední tahy slily. Osm a šest dílců
+            // dá pořád poznat, že je to koule, a jednotlivé čáry jdou od sebe
+            // rozeznat.
+            // KOULE: čtyři poledníky a tři rovnoběžky, drát tenčí než
+            // u hranatých tvarů. Má sedm čar dlouhých přes celý obvod, kdežto
+            // krychle dvanáct krátkých hran — při stejné tloušťce by koule
+            // nesla skoro o polovinu víc barvy a v předloze by opticky
+            // převažovala nad ostatními tvary.
+            Save(ShapeType.Sphere, Coarse.Sphere(4, 3), 0.0014f);
+            // TORUS MÁ TENČÍ DRÁT. Je vysoký jen 24 mm, takže 1,8 mm je
+            // u něj 7,5 % rozměru, kdežto u krychle 3 % — příčné kroužky se
+            // pak slily do klubka. Při jednom milimetru drží stejnou váhu
+            // jako ostatní tvary.
+            //
+            // KOLIK ČAR: šest příčných kroužků a čtyři podélné.
+            //
+            // Podélné čáry vycházejí po obvodu trubky rovnoměrně, takže při
+            // čtyřech vedou vnějškem, vrchem, vnitřkem a spodkem — dvě z nich
+            // obkreslují obrys a díru, další dvě běží po hřbetu a po břiše
+            // malých kroužků. Osmi a víc kroužky se tvar slévá do klubka,
+            // šest je hranice čitelnosti.
+            Save(ShapeType.Torus, Coarse.Torus(6, 4, 0.40f), 0.0010f);
 
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
             Debug.Log($"[BP] Vygenerovány drátové modely do {OutputFolder}, tloušťka {WireThickness * 1000f} mm.");
         }
 
-        private static void Save(ShapeType shape, List<Edge> edges)
+        private static void Save(ShapeType shape, List<Edge> edges, float thickness = WireThickness)
         {
-            var mesh = BuildWireMesh(edges);
+            var mesh = BuildWireMesh(edges, thickness);
             mesh.name = "Wire_" + shape;
 
             var path = $"{OutputFolder}/Wire_{shape}.asset";
@@ -86,7 +113,7 @@ namespace BP.EditorTools
         /// Poskládá hranolky podél všech hran do jednoho meshe.
         /// Jeden mesh = jedno vykreslení, i když má tvar sto hran.
         /// </summary>
-        private static Mesh BuildWireMesh(List<Edge> edges)
+        private static Mesh BuildWireMesh(List<Edge> edges, float thickness = WireThickness)
         {
             // Normalizace na stejnou velikost jako plné tvary.
             var min = Vector3.one * float.MaxValue;
@@ -100,11 +127,36 @@ namespace BP.EditorTools
             var center = (min + max) * 0.5f;
             var size = max - min;
             var largest = Mathf.Max(size.x, Mathf.Max(size.y, size.z));
-            var factor = largest > 0.0001f ? TargetSize / largest : 1f;
+
+            // KOSTRA SE ZMENŠÍ O TLOUŠŤKU DRÁTU, ne na plnou velikost tvaru.
+            // Hranolek se osazuje na hranu, takže polovina jeho tloušťky
+            // trčí ven. Když se kostra normalizovala rovnou na 60 mm, měl
+            // drátový model 61,8 mm a o těch 0,9 mm na každé straně zajížděl
+            // do sousedního tvaru. U krychle to bylo vidět nejvíc: její horní
+            // stěna leží celá v rovině dotyku, kdežto koule nebo jehlan se
+            // téhle roviny dotýkají jen bodem, kde není do čeho zajet.
+            // Hlídá se KAŽDÁ OSA, ne jen ta největší. Tvar má po normalizaci
+            // rozměr TargetSize * size[i] / largest; drát k němu přidá svou
+            // tloušťku celou, bez ohledu na to, jak je ta osa krátká. U torusu
+            // je svislý rozměr jen 40 % vodorovného, takže na něj 1,2 mm drátu
+            // dopadne třikrát tíž — a model by byl vyšší než plný tvar a zajel
+            // by do souseda nad sebou.
+            var factor = 1f;
+
+            if (largest > 0.0001f)
+            {
+                factor = TargetSize / largest;
+
+                foreach (var osa in new[] { size.x, size.y, size.z })
+                {
+                    if (osa <= 0.0001f) continue;
+                    factor = Mathf.Min(factor, TargetSize / largest - thickness / osa);
+                }
+            }
 
             var verts = new List<Vector3>();
             var tris = new List<int>();
-            var half = WireThickness * 0.5f;
+            var half = thickness * 0.5f;
 
             foreach (var e in edges)
             {
@@ -190,83 +242,165 @@ namespace BP.EditorTools
                 return FromIndices(v, e);
             }
 
-            public static List<Edge> Cylinder(int seg)
+            /// <summary>
+            /// Drátový válec: kruh dole, kruh nahoře a svislé čáry mezi nimi.
+            ///
+            /// POČET SVISLÝCH ČAR A HLADKOST KRUHŮ ZVLÁŠŤ. Dřív se kruh
+            /// kreslil z tolika dílků, kolik bylo svislic — osm svislic tedy
+            /// znamenalo osmiúhelníkovou podstavu a přidat kulatost šlo jen
+            /// tak, že se přidaly další svislé čáry.
+            /// </summary>
+            public static List<Edge> Cylinder(int svislych)
             {
                 var list = new List<Edge>();
-                for (var i = 0; i < seg; i++)
+
+                Kruh(list, -.5f, .5f, KruhovaHladkost);
+                Kruh(list, .5f, .5f, KruhovaHladkost);
+
+                for (var i = 0; i < svislych; i++)
                 {
-                    var t0 = 2f * Mathf.PI * i / seg;
-                    var t1 = 2f * Mathf.PI * (i + 1) / seg;
-
-                    var b0 = new Vector3(Mathf.Cos(t0) * .5f, -.5f, Mathf.Sin(t0) * .5f);
-                    var b1 = new Vector3(Mathf.Cos(t1) * .5f, -.5f, Mathf.Sin(t1) * .5f);
-                    var u0 = new Vector3(b0.x, .5f, b0.z);
-                    var u1 = new Vector3(b1.x, .5f, b1.z);
-
-                    list.Add(new Edge(b0, b1));
-                    list.Add(new Edge(u0, u1));
-                    list.Add(new Edge(b0, u0));
+                    var t = 2f * Mathf.PI * i / svislych;
+                    var x = Mathf.Cos(t) * .5f;
+                    var z = Mathf.Sin(t) * .5f;
+                    list.Add(new Edge(new Vector3(x, -.5f, z), new Vector3(x, .5f, z)));
                 }
+
                 return list;
             }
 
-            public static List<Edge> Cone(int seg)
+            /// <summary>Drátový kužel: kruh dole a čáry k vrcholu.</summary>
+            public static List<Edge> Cone(int svislych)
             {
                 var list = new List<Edge>();
-                var apex = new Vector3(0, .5f, 0);
-                for (var i = 0; i < seg; i++)
-                {
-                    var t0 = 2f * Mathf.PI * i / seg;
-                    var t1 = 2f * Mathf.PI * (i + 1) / seg;
-                    var b0 = new Vector3(Mathf.Cos(t0) * .5f, -.5f, Mathf.Sin(t0) * .5f);
-                    var b1 = new Vector3(Mathf.Cos(t1) * .5f, -.5f, Mathf.Sin(t1) * .5f);
+                var vrchol = new Vector3(0, .5f, 0);
 
-                    list.Add(new Edge(b0, b1));
-                    list.Add(new Edge(b0, apex));
+                Kruh(list, -.5f, .5f, KruhovaHladkost);
+
+                for (var i = 0; i < svislych; i++)
+                {
+                    var t = 2f * Mathf.PI * i / svislych;
+                    list.Add(new Edge(
+                        new Vector3(Mathf.Cos(t) * .5f, -.5f, Mathf.Sin(t) * .5f), vrchol));
                 }
+
                 return list;
             }
 
-            public static List<Edge> Sphere(int lon, int lat)
-            {
-                var list = new List<Edge>();
-                System.Func<int, int, Vector3> pt = (x, y) =>
-                {
-                    var phi = Mathf.PI * y / lat;
-                    var theta = 2f * Mathf.PI * x / lon;
-                    return new Vector3(Mathf.Sin(phi) * Mathf.Cos(theta),
-                                       Mathf.Cos(phi),
-                                       Mathf.Sin(phi) * Mathf.Sin(theta)) * .5f;
-                };
+            /// <summary>Dílků na jeden kruh. Nepřidávají čáry, jen je vyhlazují.</summary>
+            private const int KruhovaHladkost = 44;
 
-                for (var y = 0; y <= lat; y++)
-                for (var x = 0; x < lon; x++)
+            private static void Kruh(List<Edge> list, float y, float r, int dilku)
+            {
+                for (var i = 0; i < dilku; i++)
                 {
-                    if (y > 0 && y < lat) list.Add(new Edge(pt(x, y), pt(x + 1, y)));   // rovnoběžky
-                    if (y < lat) list.Add(new Edge(pt(x, y), pt(x, y + 1)));            // poledníky
+                    var t0 = 2f * Mathf.PI * i / dilku;
+                    var t1 = 2f * Mathf.PI * (i + 1) / dilku;
+                    list.Add(new Edge(
+                        new Vector3(Mathf.Cos(t0) * r, y, Mathf.Sin(t0) * r),
+                        new Vector3(Mathf.Cos(t1) * r, y, Mathf.Sin(t1) * r)));
                 }
+            }
+
+            /// <summary>
+            /// Drátová koule: poledníky od pólu k pólu a rovnoběžky kolem dokola.
+            ///
+            /// POČET ČAR A JEJICH HLADKOST ZVLÁŠŤ, ze stejného důvodu jako
+            /// u torusu. Při pravidelné mřížce byla rovnoběžka nakreslená
+            /// z tolika dílků, kolik bylo poledníků — osm poledníků tedy
+            /// znamenalo osmiúhelníkovou rovnoběžku. Přidat kulatost se
+            /// nedalo jinak než přidat čáry, a naopak.
+            /// </summary>
+            public static List<Edge> Sphere(int poledniku, int rovnobezek)
+            {
+                const int hladkost = 44;
+
+                var list = new List<Edge>();
+
+                System.Func<float, float, Vector3> bod = (phi, theta) =>
+                    new Vector3(Mathf.Sin(phi) * Mathf.Cos(theta),
+                                Mathf.Cos(phi),
+                                Mathf.Sin(phi) * Mathf.Sin(theta)) * .5f;
+
+                // Poledníky: půlkruh od severního pólu k jižnímu.
+                for (var m = 0; m < poledniku; m++)
+                {
+                    var theta = Mathf.PI * m / poledniku;   // půlka stačí, druhá je táž kružnice
+
+                    for (var i = 0; i < hladkost; i++)
+                    {
+                        var p0 = 2f * Mathf.PI * i / hladkost;
+                        var p1 = 2f * Mathf.PI * (i + 1) / hladkost;
+                        list.Add(new Edge(bod(p0, theta), bod(p1, theta)));
+                    }
+                }
+
+                // Rovnoběžky: kružnice v pevné výšce, rozložené mezi póly.
+                for (var k = 1; k <= rovnobezek; k++)
+                {
+                    var phi = Mathf.PI * k / (rovnobezek + 1);
+
+                    for (var i = 0; i < hladkost; i++)
+                    {
+                        var t0 = 2f * Mathf.PI * i / hladkost;
+                        var t1 = 2f * Mathf.PI * (i + 1) / hladkost;
+                        list.Add(new Edge(bod(phi, t0), bod(phi, t1)));
+                    }
+                }
+
                 return list;
             }
 
-            public static List<Edge> Torus(int major, int minor, float tube)
+            /// <summary>
+            /// Drátový torus: příčné kroužky kolem trubky a podélné čáry dokola.
+            ///
+            /// HUSTOTA ČAR A JEJICH HLADKOST JSOU DVĚ RŮZNÉ VĚCI. Dřív se
+            /// kreslila pravidelná mřížka, takže každé zjemnění křivky přidalo
+            /// i čáru navíc: při dvanácti dílcích byl torus změť a při osmi
+            /// zase hranatý mnohoúhelník. Tady určuje počet ČAR parametr
+            /// a jejich HLADKOST konstanta, takže jde mít pár čar, a přesto
+            /// kulatých.
+            /// </summary>
+            public static List<Edge> Torus(int prstencu, int podelnych, float tube)
             {
+                // Dílků na jednu čáru. Nepřidávají čáry, jen je vyhlazují.
+                const int hladkostPrstence = 22;
+                const int hladkostObvodu = 44;
+
                 var list = new List<Edge>();
                 var r = .5f - tube * .5f;
 
-                System.Func<int, int, Vector3> pt = (i, j) =>
+                System.Func<float, float, Vector3> bod = (u, v) =>
                 {
-                    var u = 2f * Mathf.PI * i / major;
-                    var v = 2f * Mathf.PI * j / minor;
                     var rr = r + tube * .5f * Mathf.Cos(v);
                     return new Vector3(Mathf.Cos(u) * rr, tube * .5f * Mathf.Sin(v), Mathf.Sin(u) * rr);
                 };
 
-                for (var i = 0; i < major; i++)
-                for (var j = 0; j < minor; j++)
+                // Příčné kroužky: říkají, že je to trubka.
+                for (var i = 0; i < prstencu; i++)
                 {
-                    list.Add(new Edge(pt(i, j), pt(i + 1, j)));
-                    list.Add(new Edge(pt(i, j), pt(i, j + 1)));
+                    var u = 2f * Mathf.PI * i / prstencu;
+
+                    for (var j = 0; j < hladkostPrstence; j++)
+                    {
+                        var v0 = 2f * Mathf.PI * j / hladkostPrstence;
+                        var v1 = 2f * Mathf.PI * (j + 1) / hladkostPrstence;
+                        list.Add(new Edge(bod(u, v0), bod(u, v1)));
+                    }
                 }
+
+                // Podélné čáry: ty nesou obrys, takže musí být hladké.
+                for (var m = 0; m < podelnych; m++)
+                {
+                    var v = 2f * Mathf.PI * m / podelnych;
+
+                    for (var i = 0; i < hladkostObvodu; i++)
+                    {
+                        var u0 = 2f * Mathf.PI * i / hladkostObvodu;
+                        var u1 = 2f * Mathf.PI * (i + 1) / hladkostObvodu;
+                        list.Add(new Edge(bod(u0, v), bod(u1, v)));
+                    }
+                }
+
                 return list;
             }
 

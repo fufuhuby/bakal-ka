@@ -47,16 +47,16 @@ namespace BP.Core
         }
 
         /// <summary>
-        /// Vytvoří objekt daného tvaru a barvy na staging pointu.
+        /// Vytvoří objekt daného tvaru, barvy a velikosti na staging pointu.
         /// stepIndex je krok šablony, ke kterému se objekt hlásí (-1 = mimo šablonu).
         /// </summary>
-        public ShapeInstance Spawn(ShapeType shape, PaletteColor color, int stepIndex)
+        public ShapeInstance Spawn(ShapeType shape, PaletteColor color, ShapeSize size, int stepIndex)
         {
             var prefab = library.GetPrefab(shape);
             if (prefab == null) return null;
 
             var go = Instantiate(prefab, stagingPoint.position, stagingPoint.rotation, container);
-            go.name = $"{color}_{shape}";
+            go.name = $"{ShapeSizes.Label(size)}_{color}_{shape}";
 
             var instance = go.GetComponent<ShapeInstance>();
             if (instance == null)
@@ -65,7 +65,8 @@ namespace BP.Core
                 return null;
             }
 
-            instance.Initialize(shape, color, stepIndex, library.GetMaterial(color), Time.realtimeSinceStartup);
+            instance.Initialize(shape, color, size, stepIndex,
+                library.GetMaterial(color), Time.realtimeSinceStartup);
 
             if (Spawned != null) Spawned(instance);
             return instance;
