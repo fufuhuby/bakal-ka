@@ -18,7 +18,11 @@ namespace BP.Core
         {
             switch (t)
             {
-                case ShapeType.Cube: return "kostka";
+                // KRYCHLE, ne kostka. Kostka je taky hrací kostka a kostka
+                // cukru; krychle je jednoznačně těleso. Parser bere obojí
+                // (kmeny „krychl" i „kostk"), takže kdo řekne „kostka“,
+                // dostane totéž — mění se jen to, co je napsané.
+                case ShapeType.Cube: return "krychle";
                 case ShapeType.Sphere: return "koule";
                 case ShapeType.Cylinder: return "válec";
                 case ShapeType.Cone: return "kužel";

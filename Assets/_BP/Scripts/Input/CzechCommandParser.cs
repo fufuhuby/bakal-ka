@@ -37,8 +37,22 @@ namespace BP.Input
         /// <summary>Co chybělo, když se příkaz nepovedlo složit — jde do logu.</summary>
         public readonly string Problem;
 
+        /// <summary>
+        /// Věta kromě objektu žádala i odkrytí plánku („červený torus, ukaž
+        /// plán"). Intent zůstává Create — tohle je přídavek k němu.
+        /// </summary>
+        public readonly bool AlsoReveal;
+
+        /// <summary>
+        /// Věta kromě objektu žádala i vrácení („zpět, malý modrý osmistěn").
+        /// Vrácení se provádí PŘED vytvořením, protože v tom pořadí to
+        /// participant říká i myslí.
+        /// </summary>
+        public readonly bool AlsoUndo;
+
         public VoiceCommand(VoiceIntent intent, ShapeType shape, PaletteColor color,
-            ShapeSize size, bool hasSize, string problem)
+            ShapeSize size, bool hasSize, string problem,
+            bool alsoReveal = false, bool alsoUndo = false)
         {
             Intent = intent;
             Shape = shape;
@@ -46,6 +60,8 @@ namespace BP.Input
             Size = size;
             HasSize = hasSize;
             Problem = problem;
+            AlsoReveal = alsoReveal;
+            AlsoUndo = alsoUndo;
         }
 
         public static VoiceCommand Nic(string problem)
@@ -104,7 +120,10 @@ namespace BP.Input
             ("kostk", ShapeType.Cube),
             ("krychl", ShapeType.Cube),
             ("torus", ShapeType.Torus),
+            // „donat" je jen jiný zápis téhož — model přepsal „donut" takhle
+            // a povel se odmítl, i když ho participant řekl srozumitelně.
             ("donut", ShapeType.Torus),
+            ("donat", ShapeType.Torus),
             ("koul", ShapeType.Sphere),
             ("kul", ShapeType.Sphere),
         };
@@ -138,10 +157,20 @@ namespace BP.Input
         /// Slovník do promptu pro přepis. Whisper s ním dělá míň překlepů
         /// v názvech, které v běžné češtině nejsou časté.
         /// </summary>
+        /// <summary>
+        /// Nápověda k PRAVOPISU pro model přepisu — ne seznam povelů.
+        ///
+        /// PROČ TU NEJSOU BARVY, VELIKOSTI ANI „ZPĚT": model z nápovědy na
+        /// tichu papouškuje. Když v ní stálo „modrá, zelená, … kostka, koule,
+        /// zpět", skládal si z těch slov hotové povely a posílal je jako
+        /// přepis šumu — 18. 9. se tak sama od sebe vytvořila „zelená koule".
+        /// Čím míň z nápovědy jde poskládat platný povel, tím líp.
+        ///
+        /// Zůstávají jen slova, která běžná čeština nepoužívá a model je bez
+        /// nápovědy komolí. Barvy a číslovky umí i bez nás.
+        /// </summary>
         public const string Slovnik =
-            "modrá, zelená, žlutá, červená, fialová, oranžová, růžová, "
-            + "válec, kužel, osmistěn, jehlan, kostka, torus, koule, "
-            + "malý, střední, velký, zpět, ukaž plán";
+            "osmistěn, jehlan, torus, válec, kužel, krychle";
 
         /// <summary>
         /// Rozebere přepis. Velikost je nepovinná — blok, který ji neřeší,
@@ -156,66 +185,106 @@ namespace BP.Input
             // Barva a tvar se hledají PŘED rozhodnutím o plánku: podle nich
             // se pozná, jestli „ukaž" míří na předlohu, nebo je to jen
             // sloveso u objektu.
-            var maBarvu = NajdiBarvu(text, out var barva);
-            var maTvar = NajdiTvar(text, out var tvar);
-            var maVelikost = NajdiVelikost(text, out var velikost);
+            var barev = NajdiBarvu(text, out var barva);
+            var tvaru = NajdiTvar(text, out var tvar);
+            var velikosti = NajdiVelikost(text, out var velikost);
+
+            var maBarvu = barev == 1;
+            var maTvar = tvaru == 1;
+            var maVelikost = velikosti == 1;
+
+            // DVĚ HODNOTY TÉŽE VLASTNOSTI = POVEL SE ODMÍTNE, netipuje se.
+            //
+            // „fialovo modrá koule" vytvořila modrou, protože se brala
+            // poslední nalezená barva. Participant pak dal zpět a řekl to
+            // znovu — a v datech to vypadalo jako JEHO chyba, přestože
+            // rozhodl parser. Odmítnutý povel je v datech poctivější:
+            // je vidět, že aplikace nevěděla, a ne že se člověk spletl.
+            if (barev > 1) return VoiceCommand.Nic("dve barvy");
+            if (tvaru > 1) return VoiceCommand.Nic("dva tvary");
+            if (velikosti > 1) return VoiceCommand.Nic("dve velikosti");
 
             // Plánek jako první. Nenese barvu ani tvar, takže by jinak spadl
             // do větve „chybí barva".
-            if (Obsahuje(text, Planek)
-                || (Obsahuje(text, Ukaz) && !maBarvu && !maTvar))
+            var chcePlanek = Obsahuje(text, Planek)
+                             || (Obsahuje(text, Ukaz) && !maBarvu && !maTvar);
+
+            if (chcePlanek && !(maBarvu && maTvar))
                 return new VoiceCommand(VoiceIntent.Reveal, default, default, default, false, null);
 
-            if (Obsahuje(text, Zpet)) return new VoiceCommand(
-                VoiceIntent.Undo, default, default, default, false, null);
+            // „Zpět" se stejně jako plánek stává PŘÍDAVKEM, když je ve větě
+            // i objekt. Dřív se z „zpět, malý modrý osmistěn" provedlo jen
+            // vrácení a objekt zmizel bez záznamu — tatáž tichá ztráta, jakou
+            // předváděla věta s plánkem.
+            var chceZpet = Obsahuje(text, Zpet);
+
+            if (chceZpet && !(maBarvu && maTvar))
+                return new VoiceCommand(VoiceIntent.Undo, default, default, default, false, null);
 
             if (!maBarvu && !maTvar) return VoiceCommand.Nic("nerozpoznano");
             if (!maBarvu) return VoiceCommand.Nic("chybi barva");
             if (!maTvar) return VoiceCommand.Nic("chybi tvar");
 
+            // OBJEKT I PLÁNEK V JEDNÉ VĚTĚ. „Červený torus. Ukaž plán."
+            // se dřív provedl jen zpola — objekt vznikl a odkrytí zmizelo
+            // bez jediného záznamu. Tichá ztráta je v datech to nejhorší,
+            // co se může stát: nejde poznat, že se něco stalo.
             return new VoiceCommand(VoiceIntent.Create, tvar, barva,
-                maVelikost ? velikost : ShapeSizes.Default, maVelikost, null);
+                maVelikost ? velikost : ShapeSizes.Default, maVelikost, null,
+                chcePlanek, chceZpet);
         }
 
         // ---- Hledání ----
 
-        private static bool NajdiBarvu(string text, out PaletteColor barva)
+        // ---- Hledání vrací POČET RŮZNÝCH hodnot, ne první nález ----
+        //
+        // Počítají se hodnoty, ne kmeny: „kostka" i „krychle" ukazují na týž
+        // tvar, takže věta s oběma není dvojznačná a projde. Dvojznačná je
+        // až věta, kde jsou DVĚ RŮZNÉ hodnoty téže vlastnosti.
+
+        private static int NajdiBarvu(string text, out PaletteColor barva)
         {
+            var pocet = 0;
+            barva = default;
+
             foreach (var (kmen, hodnota) in Barvy)
             {
                 if (text.IndexOf(kmen, StringComparison.Ordinal) < 0) continue;
-                barva = hodnota;
-                return true;
+                if (pocet == 0) { barva = hodnota; pocet = 1; continue; }
+                if (hodnota != barva) return 2;   // dvě stačí k odmítnutí
             }
 
-            barva = default;
-            return false;
+            return pocet;
         }
 
-        private static bool NajdiTvar(string text, out ShapeType tvar)
+        private static int NajdiTvar(string text, out ShapeType tvar)
         {
+            var pocet = 0;
+            tvar = default;
+
             foreach (var (kmen, hodnota) in Tvary)
             {
                 if (text.IndexOf(kmen, StringComparison.Ordinal) < 0) continue;
-                tvar = hodnota;
-                return true;
+                if (pocet == 0) { tvar = hodnota; pocet = 1; continue; }
+                if (hodnota != tvar) return 2;
             }
 
-            tvar = default;
-            return false;
+            return pocet;
         }
 
-        private static bool NajdiVelikost(string text, out ShapeSize velikost)
+        private static int NajdiVelikost(string text, out ShapeSize velikost)
         {
+            var pocet = 0;
+            velikost = ShapeSizes.Default;
+
             foreach (var (kmen, hodnota) in Velikosti)
             {
                 if (text.IndexOf(kmen, StringComparison.Ordinal) < 0) continue;
-                velikost = hodnota;
-                return true;
+                if (pocet == 0) { velikost = hodnota; pocet = 1; continue; }
+                if (hodnota != velikost) return 2;
             }
 
-            velikost = ShapeSizes.Default;
-            return false;
+            return pocet;
         }
 
         private static bool Obsahuje(string text, IReadOnlyList<string> kmeny)

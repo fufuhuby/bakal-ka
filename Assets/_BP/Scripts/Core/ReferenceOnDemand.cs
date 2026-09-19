@@ -311,7 +311,9 @@ namespace BP.Core
             // pokyn — obojí naráz se tam nevejde a zalomilo by se to.
             if (!_hlasem || _revealed) _pocetText.text = pocet;
             else if (RevealCount == 0) _pocetText.text = "řekni nahlas";
-            else _pocetText.text = "řekni nahlas  ·  " + pocet;
+            // MEZERY MÍSTO ODDĚLOVAČE. Tečka uprostřed řádku se čte jako
+            // konec věty tam, kde žádný není.
+            else _pocetText.text = "řekni nahlas     " + pocet;
         }
 
         private TextMeshProUGUI _pocetText;

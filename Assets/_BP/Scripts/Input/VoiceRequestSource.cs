@@ -40,6 +40,13 @@ namespace BP.Input
         /// <summary>Stav pro nápovědu na panelu — co se právě děje.</summary>
         public event Action<string> StatusChanged;
 
+        /// <summary>
+        /// Naměřená čísla poslední promluvy — hlasitost, šum, práh, délka
+        /// nahrávky a doba rozpoznání. Pro ladicí řádek v okně; do měření
+        /// nepatří, ale při zkoušení ušetří stahování logů z brýlí.
+        /// </summary>
+        public event Action<string> DebugChanged;
+
         public InteractionCondition Condition => InteractionCondition.Voice;
 
         [Header("Klíč a model")]
@@ -49,10 +56,25 @@ namespace BP.Input
                  "cokoli distribuovaného musí klíč zůstat na serveru.")]
         [SerializeField] private TextAsset apiKeyFile;
 
-        [SerializeField] private string model = "whisper-1";
+        [Tooltip("Model přepisu na endpointu /audio/transcriptions. " +
+                 "gpt-4o-transcribe místo staršího whisper-1: na češtinu " +
+                 "komolí znatelně míň, a endpoint i pole formuláře jsou " +
+                 "stejné, takže je to výměna jednoho řetězce.")]
+        [SerializeField] private string model = "gpt-4o-transcribe";
         [SerializeField] private string language = "cs";
 
         [Header("Mikrofon")]
+        [Tooltip("Část názvu mikrofonu, který se má použít. Prázdné = první " +
+                 "v seznamu.\n\n" +
+                 "K ČEMU TO JE: při zkoušení z editoru bere Unity první " +
+                 "zařízení, což je mikrofon notebooku — jenže prahy hlasitosti " +
+                 "jsou nastavené podle mikrofonu v brýlích a ty dva se chovají " +
+                 "jinak. Zadáním „Oculus“ se přes Link použije mikrofon " +
+                 "headsetu a zkoušení na počítači odpovídá měření.\n\n" +
+                 "V brýlích je mikrofon stejně jen jeden, takže se tím nic " +
+                 "nezkazí: když se název nenajde, vezme se první v seznamu.")]
+        [SerializeField] private string preferredMic = "Oculus";
+
         [SerializeField] private int sampleRate = 16000;
 
         [Tooltip("Délka kruhového bufferu v sekundách. Musí bezpečně pojmout " +
@@ -63,7 +85,7 @@ namespace BP.Input
         [Tooltip("Nejnižší hlasitost (RMS), pod kterou se nic nepovažuje za řeč. " +
                  "Absolutní pojistka; skutečný práh se navíc odvozuje od šumu " +
                  "v místnosti — viz speechToNoise.")]
-        [SerializeField] private float speechRms = 0.009f;
+        [SerializeField] private float speechRms = 0.003f;
 
         [Tooltip("Kolikrát hlasitější než šum v místnosti musí zvuk být, aby " +
                  "se považoval za řeč. PROČ NESTAČÍ PEVNÝ PRÁH: tichá laboratoř " +
@@ -73,20 +95,37 @@ namespace BP.Input
                  "protože v jeho trénovacích datech tichu odpovídaly titulky " +
                  "a adresy webů. Takový výmysl by se v datech objevil jako " +
                  "nerozpoznaný povel, který nikdo neřekl.")]
-        [SerializeField] private float speechToNoise = 1.5f;
+        [SerializeField] private float speechToNoise = 1.35f;
 
         [Tooltip("O kolik musí špička promluvy přerůst práh, aby se odeslala. " +
                  "Je to TŘETÍ práh v řadě za hlasitostí a délkou, takže se " +
                  "jeho zvýšení pozná hned: participant musí mluvit hlasitěji, " +
                  "aniž by bylo poznat proč.")]
         [Range(1f, 2f)]
-        [SerializeField] private float peakMargin = 1.1f;
+        [SerializeField] private float peakMargin = 1f;
+
+        [Tooltip("Nejnižší špička, při které se nahrávka vůbec pošle k přepisu. " +
+                 "PEVNÁ HODNOTA, nezávislá na šumu.\n\n" +
+                 "Odvozeno z měření 18. 9.: skutečné povely měly špičku 0,05 " +
+                 "a výš, výmysly z ticha 0,003 až 0,016. Hranice uprostřed " +
+                 "je rozdělí s rezervou na obě strany.\n\n" +
+                 "Zvýšit = participant musí mluvit hlasitěji. Snížit = model " +
+                 "dostává ticho a vymýšlí si na něm povely, které nikdo neřekl.")]
+        [SerializeField] private float minSpeechPeak = 0.02f;
 
         [Tooltip("Jak dlouhé ticho ukončí promluvu. POZOR: je to zároveň " +
                  "nejdelší pauza, jakou si participant může dovolit MEZI SLOVY. " +
                  "Při 0,45 s se „velká červená kostka\" rozpadla na tři kusy " +
-                 "a musel mluvit jako kulomet.")]
-        [SerializeField] private float silenceToEnd = 0.75f;
+                 "a musel mluvit jako kulomet.\n\n" +
+                 "0,75 s nestačilo ani při klidném tempu: v měření 18. 9. se " +
+                 "„oranžový osmistěn\" rozpadl na „Oranžový\" (chybí tvar) " +
+                 "a „osmistěn\" (chybí barva). 1,1 s dává nad tou pauzou " +
+                 "rezervu.\n\n" +
+                 "CENA: o tuhle dobu se každý povel odešle později, a protože " +
+                 "se sem započítává, PRODLUŽUJE naměřený čas hlasové podmínky. " +
+                 "Rozpadlá věta ale stojí celé zopakování povelu, takže je to " +
+                 "pořád výhodná výměna — jen se o ní musí vědět.")]
+        [SerializeField] private float silenceToEnd = 1.1f;
 
         [Tooltip("Kolik zvuku před začátkem řeči se přibalí. Bez náběhu chybí " +
                  "první hláska a z „kostka“ zbude „ostka“.")]
@@ -204,7 +243,14 @@ namespace BP.Input
                 return;
             }
 
-            _device = Microphone.devices[0];
+            _device = VybratMikrofon();
+
+            // KTERÝ MIKROFON SE POUŽIL, PATŘÍ DO LOGU. Unity si drží vlastní
+            // pořadí zařízení a to se změní připojením sluchátek — session
+            // by pak běžela na jiném mikrofonu, než sis myslel, a naměřené
+            // hlasitosti by se nedaly srovnávat s ostatními.
+            Debug.Log("[Voice] Mikrofon: " + _device);
+            Zaloguj(LogEvent.Note, "mikrofon=\"" + _device + "\"");
 
             // Smyčkový záznam: mikrofon běží pořád a přepisuje kruhový buffer.
             // Bez smyčky by se po vyčerpání délky sám zastavil a poslouchání
@@ -335,10 +381,20 @@ namespace BP.Input
 
             // Druhá pojistka: úsek musel někde výrazně přerůst šum, ne jen
             // přeškrábnout práh. Bez ní projde pomalé zesílení ventilace.
-            if (_speechPeak < Mathf.Max(speechRms, _noiseFloor * speechToNoise) * peakMargin)
+            //
+            // BERE SE PŘÍSNĚJŠÍ ZE DVOU MĚŘÍTEK — pevné a relativní k šumu.
+            // Relativní samo nestačí: v tiché místnosti je šum skoro nula,
+            // takže jeho násobek vyjde pod pevným prahem a pojistka se tím
+            // fakticky vypne. Přesně to se stalo 18. 9., když jsem srazil
+            // peakMargin na 1,0 — prošel dech a model z něj složil „zelená
+            // koule". Pevná hodnota drží spodní hranici bez ohledu na ticho.
+            var minSpicka = Mathf.Max(minSpeechPeak,
+                Mathf.Max(speechRms, _noiseFloor * speechToNoise) * peakMargin);
+
+            if (_speechPeak < minSpicka)
             {
                 if (logToConsole) Debug.Log("[Voice] Spicka " + _speechPeak.ToString("F4")
-                    + " nad sumem " + _noiseFloor.ToString("F4") + " — vypada to na hluk, nezasilam.");
+                    + " pod " + minSpicka.ToString("F4") + " — vypada to na hluk, nezasilam.");
                 return;
             }
 
@@ -357,27 +413,35 @@ namespace BP.Input
             {
                 _cekaNaOdeslani = wav;
                 _cekaDelka = sekundy;
+                _cekaSpicka = _speechPeak;
+                _cekaSum = _noiseFloor;
                 if (logToConsole) Debug.Log("[Voice] Rozpoznavani bezi, promluva ceka ve fronte.");
                 return;
             }
 
-            Odeslat(wav, sekundy);
+            Odeslat(wav, sekundy, _speechPeak, _noiseFloor);
         }
 
-        private void Odeslat(byte[] wav, float sekundy)
+        private void Odeslat(byte[] wav, float sekundy, float spicka, float sum)
         {
             _requestInFlight = true;
             Hlaska("rozpoznávám…");
 
-            StartCoroutine(Poslat(wav, sekundy));
+            StartCoroutine(Poslat(wav, sekundy, spicka, sum));
         }
 
+        // HLASITOST SE VEZE S NAHRÁVKOU, nečte se při zpracování odpovědi.
+        // Odložená promluva se odesílá až po doběhnutí té předchozí a mezitím
+        // už _speechPeak patří někomu jinému — v datech se pak šestkrát po
+        // sobě objevila identická hlasitost 0,0047 u různých povelů.
         private byte[] _cekaNaOdeslani;
         private float _cekaDelka;
+        private float _cekaSpicka;
+        private float _cekaSum;
 
         // ---- Whisper ----
 
-        private IEnumerator Poslat(byte[] wav, float delkaPromluvy)
+        private IEnumerator Poslat(byte[] wav, float delkaPromluvy, float spicka, float sum)
         {
             var zacatek = Time.realtimeSinceStartup;
 
@@ -410,8 +474,10 @@ namespace BP.Input
                 {
                     var dalsi = _cekaNaOdeslani;
                     var delka = _cekaDelka;
+                    var spickaFronty = _cekaSpicka;
+                    var sumFronty = _cekaSum;
                     _cekaNaOdeslani = null;
-                    Odeslat(dalsi, delka);
+                    Odeslat(dalsi, delka, spickaFronty, sumFronty);
                 }
 
                 if (req.result != UnityWebRequest.Result.Success)
@@ -434,7 +500,7 @@ namespace BP.Input
                     Debug.Log("[Voice] \"" + prepis + "\"  (" + delkaPromluvy.ToString("F2")
                               + " s reci, rozpoznani " + latence.ToString("F2") + " s)");
 
-                Zpracuj(prepis, delkaPromluvy, latence);
+                Zpracuj(prepis, delkaPromluvy, latence, spicka, sum);
             }
         }
 
@@ -446,7 +512,8 @@ namespace BP.Input
 
         // ---- Vyhodnocení ----
 
-        private void Zpracuj(string prepis, float delkaPromluvy, float latence)
+        private void Zpracuj(string prepis, float delkaPromluvy, float latence,
+            float spicka, float sum)
         {
             // HLASITOST A PRÁH JDOU DO DAT. Bez nich se otázka „mluvím
             // dost nahlas?" nedá zodpovědět jinak než hádáním; takhle se
@@ -454,9 +521,17 @@ namespace BP.Input
             var spolecne = "prepis=\"" + (prepis ?? "") + "\""
                            + " rec=" + delkaPromluvy.ToString("F2") + "s"
                            + " rozpoznani=" + latence.ToString("F2") + "s"
-                           + " hlasitost=" + _speechPeak.ToString("F4")
-                           + " sum=" + _noiseFloor.ToString("F4")
+                           + " hlasitost=" + spicka.ToString("F4")
+                           + " sum=" + sum.ToString("F4")
                            + " prah=" + Mathf.Max(speechRms, _noiseFloor * speechToNoise).ToString("F4");
+
+            if (DebugChanged != null)
+                DebugChanged("hlasitost " + spicka.ToString("F4")
+                             + "   šum " + sum.ToString("F4")
+                             + "   práh " + Mathf.Max(minSpeechPeak,
+                                 Mathf.Max(speechRms, _noiseFloor * speechToNoise) * peakMargin).ToString("F4")
+                             + "\n" + "nahrávka " + delkaPromluvy.ToString("F2") + " s"
+                             + "   rozpoznání " + latence.ToString("F2") + " s");
 
             // Výmysly z ticha se do dat zapisují jinak než skutečné
             // nerozpoznání. Bez rozlišení by vypadaly jako selhání hlasu,
@@ -479,17 +554,59 @@ namespace BP.Input
                         return;
                     }
 
+                    // V BLOKU S VELIKOSTMI JE VELIKOST POVINNÁ. Bez tohohle
+                    // se „modrá krychle" tiše vyrobila jako střední, protože
+                    // střední je výchozí hodnota — a participant si myslel,
+                    // že velikost řekl, nebo že na ní nezáleží. V menu přitom
+                    // bez vybrané velikosti vytvořit nejde, takže hlas
+                    // odpouštěl něco, co klasická podmínka neodpouští.
+                    if (_requiresSize && !prikaz.HasSize)
+                    {
+                        Zaloguj(LogEvent.VoiceMisrecognized, spolecne + " duvod=chybi velikost");
+                        Hlaska("chybí velikost");
+                        return;
+                    }
+
                     var velikost = _requiresSize ? prikaz.Size : ShapeSizes.Default;
+
+                    // VRÁCENÍ JDE PŘED VYTVOŘENÍM. „Zpět, malý modrý osmistěn"
+                    // znamená nejdřív zahodit, co je v ruce, a teprve pak si
+                    // říct o nový objekt — v opačném pořadí by vrácení smazalo
+                    // právě vytvořený kus.
+                    if (prikaz.AlsoUndo)
+                    {
+                        if ((_allowed & MenuPart.StepBack) == 0)
+                        {
+                            Zaloguj(LogEvent.Note, spolecne + " -> zpet zamceno pruvodcem");
+                        }
+                        else
+                        {
+                            Zaloguj(LogEvent.UndoUsed, spolecne + " -> hlasem (ve vete s objektem)");
+                            if (UndoRequested != null) UndoRequested();
+                        }
+                    }
 
                     Zaloguj(LogEvent.ObjectRequested, spolecne + " -> " + prikaz.Color
                         + " " + prikaz.Shape + " " + ShapeSizes.Label(velikost)
-                        + (_requiresSize || !prikaz.HasSize ? "" : " (velikost ignorovana)"));
+                        + (_requiresSize || !prikaz.HasSize ? "" : " (velikost ignorovana)")
+                        + (prikaz.AlsoReveal ? " + planek" : "")
+                        + (prikaz.AlsoUndo ? " + zpet" : ""));
 
                     Hlaska(prepis);
 
                     if (ObjectRequested != null)
                         ObjectRequested(new ObjectRequest(prikaz.Shape, prikaz.Color,
                             velikost, Time.realtimeSinceStartup));
+
+                    // Věta žádala objekt I plánek. Odkrytí se loguje zvlášť,
+                    // aby se v datech dalo spočítat stejně jako samostatné
+                    // „ukaž plán" — jinak by odkrytí schovaná v takové větě
+                    // v počtu chyběla.
+                    if (prikaz.AlsoReveal)
+                    {
+                        Zaloguj(LogEvent.ReferenceRevealed, spolecne + " -> hlasem (ve vete s objektem)");
+                        if (RevealRequested != null) RevealRequested();
+                    }
                     return;
 
                 case VoiceIntent.Undo:
@@ -543,6 +660,27 @@ namespace BP.Input
         private void Zaloguj(LogEvent udalost, string detail)
         {
             if (_logger != null) _logger.Log(udalost, detail: detail);
+        }
+
+        /// <summary>
+        /// Vybere mikrofon podle části názvu, jinak první v seznamu.
+        /// </summary>
+        private string VybratMikrofon()
+        {
+            var zarizeni = Microphone.devices;
+
+            if (!string.IsNullOrEmpty(preferredMic))
+            {
+                foreach (var d in zarizeni)
+                    if (d != null && d.IndexOf(preferredMic,
+                            StringComparison.OrdinalIgnoreCase) >= 0)
+                        return d;
+
+                Debug.LogWarning("[Voice] Mikrofon obsahující \"" + preferredMic
+                                 + "\" nenalezen, beru první v pořadí.", this);
+            }
+
+            return zarizeni[0];
         }
 
         private void Hlaska(string text)

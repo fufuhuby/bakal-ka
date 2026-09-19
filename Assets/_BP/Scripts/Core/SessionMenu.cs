@@ -22,7 +22,8 @@ namespace BP.Core
             Running = 1,
             BlockDone = 2,
             SessionDone = 3,
-            Ranking = 4
+            /// <summary>Přehled všech uložených session, dá se v něm rolovat.</summary>
+            AllResults = 4
         }
 
         [Header("Závislosti")]
@@ -54,6 +55,10 @@ namespace BP.Core
         [SerializeField] private float resultsMinHeight = 240f;
         [SerializeField] private float resultsFontSize = 18f;
 
+        [Tooltip("Pevná výška panelu s přehledem všech session. Obsah v něm " +
+                 "roluje, protože počet řádků roste s každým měřením.")]
+        [SerializeField] private float allResultsHeight = 620f;
+
         [Tooltip("Přidané prostrkání řádků v procentech výšky písma. " +
                  "Řádky tabulky nalepené na sebe se čtou špatně — oko " +
                  "ztrácí, ve kterém řádku je.")]
@@ -79,6 +84,8 @@ namespace BP.Core
         [Tooltip("Čtvrté tlačítko: tutoriál hlasové verze.")]
         [SerializeField] private Color fourthButtonColor = PanelStyle.Neutral;
 
+        [SerializeField] private Color fifthButtonColor = PanelStyle.Neutral;
+
         private const string CanvasName = "SessionCanvas";
 
         /// <summary>
@@ -90,7 +97,15 @@ namespace BP.Core
         /// nedá. Od toho je tutoriál. Prázdný panel navíc nechává volné
         /// zorné pole, takže se nabídka nepřekrývá s pracovištěm.
         /// </summary>
-        private const float IntroHeight = 312f;
+        // Pět tlačítek ve třech patrech plus hlavička s ID.
+        private const float IntroHeight = 408f;
+
+        /// <summary>
+        /// Úvod je širší než ostatní obrazovky. Popisky jako „NÁCVIK: MENU"
+        /// se do úzkého tlačítka nevešly a automatické zmenšování písma je
+        /// scvrklo na nečitelnou velikost.
+        /// </summary>
+        private const float IntroWidth = 470f;
 
         /// <summary>Rozměry tlačítka v úvodní nabídce.</summary>
         private const float IntroButtonWidth = 320f;
@@ -109,6 +124,8 @@ namespace BP.Core
         private TextMeshProUGUI _thirdLabel;
         private Button _fourthButton;
         private TextMeshProUGUI _fourthLabel;
+        private Button _fifthButton;
+        private TextMeshProUGUI _fifthLabel;
 
         public Screen Current { get; private set; } = Screen.Intro;
 
@@ -163,8 +180,160 @@ namespace BP.Core
         {
             Current = Screen.Intro;
             SetPanel(true, null, null,
-                "KLASICKÁ VERZE", "HLASOVÁ VERZE", "TUTORIÁL: MENU", "TUTORIÁL: HLAS");
-            ApplyPanelLayout(width, IntroHeight);
+                "KLASICKÁ VERZE", "HLASOVÁ VERZE", "KLASICKÁ", "HLASOVÁ",
+                "VŠECHNY VÝSLEDKY");
+            ApplyPanelLayout(IntroWidth, IntroHeight);
+            PostavitHlavicku();
+            PostavitPopisNacviku();
+            ObnovitHlavicku();
+        }
+
+        // ---- Hlavicka uvodni nabidky ----
+
+        private RectTransform _hlavicka;
+        private TextMeshProUGUI _idText;
+        private TextMeshProUGUI _stavText;
+
+        /// <summary>
+        /// Hlavicka s ID participanta a s tim, co uz pod nim bylo odehrano.
+        ///
+        /// PROC TO PATRI DO NABIDKY: ID se nastavovalo jen v editoru, takze
+        /// v bryllich neslo poznat, pod kym se meri. Vsech 70 ulozenych
+        /// session ma proto stejne P01 a rozdelit je zpetne nejde. Tohle je
+        /// posledni misto, kde se ta chyba da chytit - pred startem bloku.
+        /// </summary>
+        private void PostavitHlavicku()
+        {
+            var pr = (RectTransform)_panel.transform;
+
+            // STARÁ HLAVIČKA SE ZAHODÍ A POSTAVÍ ZNOVU, nepoužije se.
+            //
+            // Posluchače tlačítek se přidávají lambdou a ty se neserializují.
+            // Když hlavička zůstane v uložené scéně, po načtení vypadá stejně,
+            // ale šipky u ID nic nedělají — a nejde to poznat jinak než tím,
+            // že se číslo nemění.
+            var stara = pr.Find("Hlavicka");
+            if (stara != null) Znicit(stara.gameObject);
+
+            var koren = New("Hlavicka", pr, new Vector2(0f, IntroHeight * 0.5f - 52f),
+                new Vector2(IntroWidth - 40f, 78f));
+            _hlavicka = (RectTransform)koren.transform;
+
+            var idGo = New("Id", _hlavicka, new Vector2(0f, 10f), new Vector2(160f, 40f));
+            Text(idGo, 30f, TextAlignmentOptions.Center, PanelStyle.Title);
+            _idText = idGo.GetComponent<TextMeshProUGUI>();
+            _idText.fontStyle = FontStyles.Bold;
+
+            SipkaId(_hlavicka, "Min", new Vector2(-118f, 10f), "–", -1);
+            SipkaId(_hlavicka, "Plus", new Vector2(118f, 10f), "+", 1);
+
+            var stavGo = New("Stav", _hlavicka, new Vector2(0f, -24f),
+                new Vector2(IntroWidth - 60f, 24f));
+            Text(stavGo, 15f, TextAlignmentOptions.Center, PanelStyle.TextSecondary);
+            _stavText = stavGo.GetComponent<TextMeshProUGUI>();
+
+            // BEZ DĚLICÍ ČÁRY. Hlavičku od tlačítek odděluje dost mezera
+            // sama o sobě; čára navíc jen přidávala grafiku, která nic
+            // neříká.
+        }
+
+        /// <summary>
+        /// Slovo „nácvik" nad dvojicí menších tlačítek.
+        ///
+        /// PROČ NE NA TLAČÍTKÁCH: „NÁCVIK: MENU" je na úzké tlačítko moc
+        /// dlouhé — písmo se automaticky zmenšilo tak, že bylo drobnější než
+        /// všude jinde. Společný nadpis to slovo řekne jednou a na tlačítka
+        /// zbude jen to, čím se od sebe liší. Navíc se tím trefí do stejných
+        /// slov jako velká tlačítka nad nimi, takže je dvojice zjevná.
+        /// </summary>
+        private void PostavitPopisNacviku()
+        {
+            var pr = (RectTransform)_panel.transform;
+
+            var stary = pr.Find("PopisNacviku");
+            if (stary != null) Znicit(stary.gameObject);
+
+            var go = New("PopisNacviku", pr, new Vector2(0f, IntroHeight * 0.5f - 250f),
+                new Vector2(IntroWidth - 80f, 22f));
+            Text(go, 15f, TextAlignmentOptions.Center, PanelStyle.TextSecondary);
+            var t = go.GetComponent<TextMeshProUGUI>();
+            t.text = "TUTORIÁL";
+            t.characterSpacing = 6f;
+        }
+
+        private void SipkaId(RectTransform rodic, string jmeno, Vector2 pos, string znak, int krok)
+        {
+            var go = New(jmeno, rodic, pos, new Vector2(40f, 40f));
+            var img = go.AddComponent<Image>();
+            PanelStyle.ApplyRoundedButton(img, 12f, PanelStyle.Card);
+
+            var b = go.AddComponent<Button>();
+            b.targetGraphic = img;
+            b.onClick.AddListener(() => PosunoutId(krok));
+
+            var lbl = New("Label", (RectTransform)go.transform, new Vector2(0f, 1f),
+                new Vector2(40f, 40f));
+            Text(lbl, 22f, TextAlignmentOptions.Center, PanelStyle.TextPrimary);
+            lbl.GetComponent<TextMeshProUGUI>().text = znak;
+        }
+
+        /// <summary>
+        /// Posune ID o jedna. Format je vzdycky "P" a dve cislice, aby se
+        /// soubory radily jako text ve stejnem poradi jako cisla.
+        /// </summary>
+        private void PosunoutId(int krok)
+        {
+            if (trialManager == null) return;
+
+            var stare = trialManager.ParticipantId;
+            var cislo = 1;
+
+            if (!string.IsNullOrEmpty(stare) && stare.Length > 1)
+                int.TryParse(stare.Substring(1), out cislo);
+
+            // DVOJCIFERNÝ ZÁPIS ZŮSTÁVÁ DO P99, teprve pak se přidá třetí
+            // číslice. Kdyby se přešlo na „P001", rozešlo by se to se všemi
+            // dosud uloženými soubory, které mají v názvu „P01" — a přehled
+            // by je považoval za jiného participanta.
+            cislo = Mathf.Clamp(cislo + krok, 1, 999);
+            trialManager.SetParticipantId("P" + (cislo < 100 ? cislo.ToString("00") : cislo.ToString()));
+
+            ObnovitHlavicku();
+        }
+
+        /// <summary>
+        /// Prepise ID a spocita, co uz ten participant odehral. Pocitaji se
+        /// JEN DOKONCENE session - prerusena nic neznamena a jako "hotovo"
+        /// by lhala.
+        /// </summary>
+        private void ObnovitHlavicku()
+        {
+            if (trialManager == null || _idText == null) return;
+
+            var id = trialManager.ParticipantId;
+            _idText.text = id;
+
+            var klasika = 0;
+            var hlas = 0;
+
+            foreach (var s in trialManager.ReadAllSessions())
+            {
+                if (!s.complete) continue;
+                if (s.participantId != id) continue;
+
+                if (s.condition == InteractionCondition.Voice) hlas++;
+                else klasika++;
+            }
+
+            if (_stavText == null) return;
+
+            _stavText.text = klasika == 0 && hlas == 0
+                ? "zatím nic neodehrál"
+                : "hotovo:  klasická " + klasika + "×     hlasová " + hlas + "×";
+
+            _stavText.color = klasika > 0 && hlas > 0
+                ? PanelStyle.Positive
+                : PanelStyle.TextSecondary;
         }
 
         private void OnBlockStarted(BlockDefinition block, int index)
@@ -203,25 +372,462 @@ namespace BP.Core
                 ? trialManager.BuildResultsTable()
                 : "Všechny bloky dokončeny.";
 
-            // Podmínka patří do nadpisu, ne do sloupce — v tabulce by se
-            // opakovala ve všech řádcích, protože session je jen jedna.
-            var verze = trialManager == null ? ""
-                : trialManager.Mode == TrialManager.SessionMode.Voice
-                    ? "  ·  HLASOVÁ VERZE" : "  ·  KLASICKÁ VERZE";
-
-            ShowTable("VÝSLEDKY" + verze, table, "NEJLEPŠÍ VÝSLEDKY", "MENU");
+            // NADPIS JE JEN „VÝSLEDKY". Podmínka v něm stála proto, že
+            // v tabulce nebyla — jenže sloupec Úloha ji teď nese v každém
+            // řádku („hlasová + velikost"), takže v nadpisu už jen
+            // zdvojovala to, co je pod ním.
+            ShowTable("VÝSLEDKY", table, "MENU");
         }
 
-        /// <summary>Žebříček napříč všemi uloženými session.</summary>
-        public void ShowRanking()
+        /// <summary>
+        /// Přehled všech uložených session. Na rozdíl od žebříčku se nic
+        /// nefiltruje ani neslučuje — je to výpis toho, co se kdy naměřilo,
+        /// včetně přerušených pokusů.
+        ///
+        /// Dostupný z úvodní nabídky, aby se do něj dalo podívat i bez
+        /// odehrání session. Doteď se výsledky daly vidět jen na konci hraní.
+        /// </summary>
+        public void ShowAllResults()
         {
-            Current = Screen.Ranking;
+            Current = Screen.AllResults;
 
-            var table = trialManager != null
-                ? trialManager.BuildRankingTable()
-                : "Žebříček není dostupný.";
+            ApplyResultsWidth();
+            SetPanel(true, "VŠECHNY VÝSLEDKY", "", "MENU");
+            if (_title != null) _title.text = "VŠECHNY VÝSLEDKY";
 
-            ShowTable("NEJLEPŠÍ VÝSLEDKY", table, "ZPĚT NA VÝSLEDKY", "MENU");
+            var pr = (RectTransform)_panel.transform;
+            pr.sizeDelta = new Vector2(resultsWidth, allResultsHeight);
+
+            var canvasRt = pr.parent as RectTransform;
+            if (canvasRt != null)
+                canvasRt.sizeDelta = new Vector2(resultsWidth, allResultsHeight + 90f);
+
+            // Nadpis drzi horni hranu panelu. Bez tohohle zustal viset tam,
+            // kde byl pri malem panelu - tedy uprostred tabulky.
+            var title = pr.Find("Title") as RectTransform;
+            if (title != null)
+            {
+                title.sizeDelta = new Vector2(resultsWidth - 40f, 46f);
+                title.anchoredPosition = new Vector2(0f, allResultsHeight * 0.5f - 34f);
+            }
+
+            if (_body != null) _body.gameObject.SetActive(false);
+
+            PostavitPrehled(pr);
+            NaplnitPrehled();
+
+            RadaTlacitek(pr, resultsWidth, allResultsHeight, 34f);
+        }
+
+        // ---- Prehled vsech session ----
+
+        private bool _chciHlas = true;
+        private bool _chciKlasiku = true;
+
+        /// <summary>Radit podle casu (nejlepsi nahore), nebo od nejnovejsich?</summary>
+        private bool _podleCasu;
+
+        private RectTransform _prehled;
+        private RectTransform _obsah;
+
+        /// <summary>Zatrzitka: ctverecek, ktery se vybarvi, kdyz je zapnuto.</summary>
+        private readonly List<Image> _zatrzitka = new List<Image>();
+
+        /// <summary>Ramecek kolem zatrzitka - svitne, kdyz je volba zapnuta.</summary>
+        private readonly List<Image> _ramecky = new List<Image>();
+
+        private readonly List<TextMeshProUGUI> _popisky = new List<TextMeshProUGUI>();
+
+        /// <summary>
+        /// Sloupce prehledu: nadpis a sirka. TABULKA SE SKLADA Z BUNEK, ne
+        /// z jednoho textu s mezerami.
+        ///
+        /// Driv to byl jeden odstavec vysazeny neproporcionalne pres znacku
+        /// mspace - a ta natahne rozestupy i uvnitr slov, takze "Celkem" se
+        /// cetlo jako "C e l k e m". Vlastni bunky se daji zarovnat na stred
+        /// a pismo zustane normalni.
+        /// </summary>
+        private static readonly (string nadpis, float sirka)[] Sloupce =
+        {
+            ("Kdy", 120f),
+            ("Úloha", 110f),
+            ("Kdo", 70f),
+            ("Čistý čas", 110f),
+            ("S postihy", 110f),
+            ("Chyby", 80f),
+            ("Terče", 100f),
+            ("Stav", 120f)
+        };
+
+        private const float RadekVyska = 30f;
+
+        /// <summary>Okraj vpravo, kde sedí šipky pro posun seznamu.</summary>
+        private const float PosuvnikSirka = 46f;
+
+        private void PostavitPrehled(RectTransform pr)
+        {
+            // Stejný důvod jako u hlavičky: uložená kopie by měla mrtvá
+            // zaškrtávátka i šipky.
+            var stare = pr.Find("Prehled");
+            if (stare != null) Znicit(stare.gameObject);
+
+            const float titleArea = 74f;
+            const float bottomPad = 86f;
+            const float filtrVyska = 40f;
+            const float hlavickaVyska = 28f;
+
+            var sirka = resultsWidth - 50f;
+            var vyskaCela = allResultsHeight - titleArea - bottomPad;
+
+            var koren = New("Prehled", pr, new Vector2(0f, -(titleArea - bottomPad) * 0.5f),
+                new Vector2(sirka, vyskaCela));
+            _prehled = (RectTransform)koren.transform;
+
+            // Tabulka je o posuvnik uzsi nez panel a je proti nemu posunuta
+            // doleva. Hlavicka musi sedet na TOMTO stredu, ne na stredu
+            // panelu - jinak jsou nadpisy o par pixelu vedle hodnot.
+            var tabulkaSirka = sirka - PosuvnikSirka - 6f;
+            var tabulkaX = -(PosuvnikSirka + 6f) * 0.5f;
+
+            // ---- Radek se zatrzitky ----
+            var filtrY = vyskaCela * 0.5f - filtrVyska * 0.5f;
+            var popisky = new[] { "hlasová", "klasická", "od nejlepších" };
+            var sirky = new[] { 150f, 160f, 190f };
+
+            var celkem = 0f;
+            foreach (var w in sirky) celkem += w;
+            var x = tabulkaX - celkem * 0.5f;
+
+            _zatrzitka.Clear();
+            _ramecky.Clear();
+            _popisky.Clear();
+            for (var i = 0; i < popisky.Length; i++)
+            {
+                var index = i;
+                var w = sirky[i];
+
+                var go = New("Volba" + i, _prehled, new Vector2(x + w * 0.5f, filtrY),
+                    new Vector2(w, 30f));
+
+                // Prusvitny podklad jen kvuli tomu, aby slo na skupinu
+                // klepnout celou, ne jen na ctverecek.
+                var plocha = go.AddComponent<Image>();
+                plocha.color = new Color(1f, 1f, 1f, 0.0001f);
+
+                var b = go.AddComponent<Button>();
+                b.targetGraphic = plocha;
+                b.onClick.AddListener(() =>
+                {
+                    if (index == 0) _chciHlas = !_chciHlas;
+                    else if (index == 1) _chciKlasiku = !_chciKlasiku;
+                    else _podleCasu = !_podleCasu;
+                    NaplnitPrehled();
+                });
+
+                var box = New("Box", (RectTransform)go.transform,
+                    new Vector2(-w * 0.5f + 13f, 0f), new Vector2(22f, 22f));
+                var bi = box.AddComponent<Image>();
+                PanelStyle.ApplyRounded(bi, 6f, PanelStyle.Card);
+                _ramecky.Add(bi);
+
+                var vypln = New("Vypln", (RectTransform)box.transform, Vector2.zero,
+                    new Vector2(12f, 12f));
+                var vi = vypln.AddComponent<Image>();
+                PanelStyle.ApplyRounded(vi, 3f, PanelStyle.Window);
+                _zatrzitka.Add(vi);
+
+                var lbl = New("Label", (RectTransform)go.transform,
+                    new Vector2(15f, 0f), new Vector2(w - 34f, 24f));
+                Text(lbl, 16f, TextAlignmentOptions.Left, PanelStyle.TextPrimary);
+                _popisky.Add(lbl.GetComponent<TextMeshProUGUI>());
+                _popisky[_popisky.Count - 1].text = popisky[i];
+
+                x += w;
+            }
+
+            // ---- Hlavicka sloupcu ----
+            var hlavY = filtrY - filtrVyska * 0.5f - hlavickaVyska * 0.5f;
+            var hlavicka = New("Hlavicka", _prehled, new Vector2(tabulkaX, hlavY),
+                new Vector2(tabulkaSirka, hlavickaVyska));
+            PostavitBunky((RectTransform)hlavicka.transform, null, PanelStyle.TextSecondary, true);
+
+            // Tenka linka pod hlavickou oddeli nadpisy od hodnot.
+            var linka = New("Linka", _prehled,
+                new Vector2(tabulkaX, hlavY - hlavickaVyska * 0.5f - 2f),
+                new Vector2(tabulkaSirka, 1.5f));
+            var li = linka.AddComponent<Image>();
+            li.color = new Color(1f, 1f, 1f, 0.12f);
+
+            // ---- Rolovaci plocha ----
+            var vyrezVyska = vyskaCela - filtrVyska - hlavickaVyska - 12f;
+            var vyrezY = hlavY - hlavickaVyska * 0.5f - vyrezVyska * 0.5f - 6f;
+
+            var vyrez = New("Vyrez", _prehled, new Vector2(tabulkaX, vyrezY),
+                new Vector2(tabulkaSirka, vyrezVyska));
+            vyrez.AddComponent<RectMask2D>();
+
+            var obsah = New("Obsah", (RectTransform)vyrez.transform, Vector2.zero,
+                new Vector2(tabulkaSirka, 10f));
+            _obsah = (RectTransform)obsah.transform;
+            _obsah.anchorMin = new Vector2(0.5f, 1f);
+            _obsah.anchorMax = new Vector2(0.5f, 1f);
+            _obsah.pivot = new Vector2(0.5f, 1f);
+            _obsah.anchoredPosition = Vector2.zero;
+
+            var scroll = vyrez.AddComponent<ScrollRect>();
+            scroll.content = _obsah;
+            scroll.viewport = (RectTransform)vyrez.transform;
+            scroll.horizontal = false;
+            scroll.vertical = true;
+            _rolovani = scroll;
+
+            scroll.movementType = ScrollRect.MovementType.Clamped;
+            scroll.inertia = false;
+            scroll.scrollSensitivity = 30f;
+            // SIPKY MISTO POSUVNIKU.
+            //
+            // Okno visi napevno pred oblicejem, takze pri tazeni obsahu se
+            // hybe ruka i cely panel zaroven a clovek nema o co opirat oko.
+            // Klepnuti na sipku je jeden jasny ukon: posune se o stranku
+            // a nic dalsiho se nedeje.
+            _sipkaNahoru = Sipka(_prehled, "SipkaNahoru",
+                new Vector2(sirka * 0.5f - 20f, vyrezY + vyrezVyska * 0.5f - 22f),
+                "▲", 1);
+            _sipkaDolu = Sipka(_prehled, "SipkaDolu",
+                new Vector2(sirka * 0.5f - 20f, vyrezY - vyrezVyska * 0.5f + 22f),
+                "▼", -1);
+
+            // Prázdná tabulka potřebuje větu. Bez ní vypadá odškrtnutí obou
+            // voleb jako by se aplikace zasekla nebo ztratila data.
+            var prazdno = New("Prazdno", _prehled, new Vector2(tabulkaX, vyrezY),
+                new Vector2(tabulkaSirka, 40f));
+            Text(prazdno, 17f, TextAlignmentOptions.Center, PanelStyle.TextSecondary);
+            _prazdnoText = prazdno.GetComponent<TextMeshProUGUI>();
+            _prazdnoText.text = "nic není vybráno";
+            prazdno.SetActive(false);
+        }
+
+        private ScrollRect _rolovani;
+        private GameObject _sipkaNahoru;
+        private GameObject _sipkaDolu;
+        private TextMeshProUGUI _prazdnoText;
+
+        /// <summary>
+        /// Tlacitko pro posun seznamu o stranku. Smer je +1 nahoru, -1 dolu.
+        /// </summary>
+        private GameObject Sipka(RectTransform rodic, string jmeno, Vector2 pos,
+            string znak, int smer)
+        {
+            var go = New(jmeno, rodic, pos, new Vector2(36f, 36f));
+            var img = go.AddComponent<Image>();
+            PanelStyle.ApplyRoundedButton(img, 10f, PanelStyle.Card);
+
+            var b = go.AddComponent<Button>();
+            b.targetGraphic = img;
+            b.onClick.AddListener(() => Posunout(smer));
+
+            var lbl = New("Label", (RectTransform)go.transform, new Vector2(0f, 1f),
+                new Vector2(36f, 36f));
+            Text(lbl, 18f, TextAlignmentOptions.Center, PanelStyle.TextPrimary);
+            lbl.GetComponent<TextMeshProUGUI>().text = znak;
+
+            return go;
+        }
+
+        /// <summary>
+        /// Posune seznam o 80 % vysky vyrezu. Ne o celou: prekryv par radku
+        /// drzi souvislost, jinak clovek po kazdem kliknuti hleda, kde skoncil.
+        /// </summary>
+        private void Posunout(int smer)
+        {
+            if (_rolovani == null || _obsah == null) return;
+
+            var vyrez = _rolovani.viewport;
+            if (vyrez == null) return;
+
+            var rozsah = _obsah.sizeDelta.y - vyrez.rect.height;
+            if (rozsah <= 0f) return;
+
+            var krok = vyrez.rect.height * 0.8f;
+            var y = _obsah.anchoredPosition.y - smer * krok;
+
+            _obsah.anchoredPosition = new Vector2(_obsah.anchoredPosition.x,
+                Mathf.Clamp(y, 0f, rozsah));
+        }
+
+        /// <summary>
+        /// Rozmisti bunky jednoho radku podle <see cref="Sloupce"/>.
+        /// Kdyz je <paramref name="hodnoty"/> null, pisou se nadpisy sloupcu.
+        /// </summary>
+        private void PostavitBunky(RectTransform radek, string[] hodnoty, Color barva, bool tucne)
+        {
+            var celkem = 0f;
+            foreach (var sl in Sloupce) celkem += sl.sirka;
+
+            var x = -celkem * 0.5f;
+
+            for (var i = 0; i < Sloupce.Length; i++)
+            {
+                var sirka = Sloupce[i].sirka;
+                var go = New("C" + i, radek, new Vector2(x + sirka * 0.5f, 0f),
+                    new Vector2(sirka, RadekVyska));
+
+                // NA STRED. Sloupce maji pevnou sirku, takze vystredene
+                // hodnoty drzi svislici i pri ruzne dlouhych textech.
+                Text(go, 16f, TextAlignmentOptions.Center, barva);
+
+                var t = go.GetComponent<TextMeshProUGUI>();
+                t.text = hodnoty == null ? Sloupce[i].nadpis : hodnoty[i];
+                t.textWrappingMode = TextWrappingModes.NoWrap;
+                if (tucne) t.fontStyle = FontStyles.Bold;
+
+                x += sirka;
+            }
+        }
+
+        private void NaplnitPrehled()
+        {
+            if (_obsah == null) return;
+
+            for (var i = _obsah.childCount - 1; i >= 0; i--)
+                DestroyImmediate(_obsah.GetChild(i).gameObject);
+
+            var vse = trialManager != null
+                ? trialManager.ReadAllSessions()
+                : new List<SessionScore>();
+
+            // ZAŠKRTÁVÁTKO ZNAMENÁ PŘESNĚ TO, CO JE VIDĚT. Dřív se „nic
+            // zaškrtnutého" chápalo jako „bez filtru" a ukázalo se všechno —
+            // úsporné, ale nepředvídatelné: odškrtnutím obou voleb se seznam
+            // místo vyprázdnění naopak rozšířil.
+            var vybrane = new List<SessionScore>();
+            foreach (var s in vse)
+            {
+                var jeHlas = s.condition == InteractionCondition.Voice;
+                if (jeHlas && !_chciHlas) continue;
+                if (!jeHlas && !_chciKlasiku) continue;
+
+                vybrane.Add(s);
+            }
+
+            if (_podleCasu)
+            {
+                // Dokoncene napred. Prerusena session ma kratky cas prave
+                // proto, ze se nedohrala, a jinak by se vyhoupla na spicku.
+                vybrane.Sort((x, y) =>
+                {
+                    if (x.complete != y.complete) return x.complete ? -1 : 1;
+                    return x.TotalTime.CompareTo(y.TotalTime);
+                });
+            }
+            else
+            {
+                // Jmeno souboru nese datum i cas v poradi, ve kterem se da
+                // radit jako text.
+                vybrane.Sort((x, y) => string.CompareOrdinal(y.soubor, x.soubor));
+            }
+
+            var sirka = _obsah.sizeDelta.x;
+
+            for (var i = 0; i < vybrane.Count; i++)
+            {
+                var s = vybrane[i];
+
+                var go = New("Radek" + i, _obsah, Vector2.zero, new Vector2(sirka, RadekVyska));
+
+                var rt = (RectTransform)go.transform;
+                rt.anchorMin = new Vector2(0.5f, 1f);
+                rt.anchorMax = new Vector2(0.5f, 1f);
+                rt.pivot = new Vector2(0.5f, 0.5f);
+                rt.anchoredPosition = new Vector2(0f, -(i + 0.5f) * RadekVyska);
+
+                // Kazdy druhy radek slaby podklad. V dlouhem seznamu oko
+                // jinak sklouzne o radek vedle.
+                if (i % 2 == 1)
+                {
+                    var pruh = go.AddComponent<Image>();
+                    pruh.color = new Color(1f, 1f, 1f, 0.035f);
+                }
+
+                // Prerusena session je ztlumena - at se v seznamu neprehledne,
+                // ze jeji cas nic neznamena.
+                var barva = s.complete
+                    ? PanelStyle.TextPrimary
+                    : new Color(PanelStyle.TextSecondary.r, PanelStyle.TextSecondary.g,
+                        PanelStyle.TextSecondary.b, 0.55f);
+
+                PostavitBunky(rt, new[]
+                {
+                    Kdy(s.soubor),
+                    s.condition == InteractionCondition.Voice ? "hlasová" : "klasická",
+                    s.participantId ?? "?",
+                    BlockTimer.Format(s.cleanTime),
+                    BlockTimer.Format(s.TotalTime),
+                    s.wrongObjects + "×",
+                    s.activations > 0 ? s.hits + "/" + s.activations : "—",
+                    s.complete ? "dokončeno" : "přerušeno"
+                }, barva, false);
+            }
+
+            _obsah.sizeDelta = new Vector2(_obsah.sizeDelta.x,
+                Mathf.Max(vybrane.Count * RadekVyska, 10f));
+            _obsah.anchoredPosition = Vector2.zero;
+
+            // ZAPNUTA VOLBA SE POZNA TREMI ZNAKY NARAZ: vybarveny ramecek,
+            // tmavy puntik uvnitr a plne bily popisek. Jeden signal byl malo -
+            // prazdny a plny krouzek se od sebe na dalku v bryllich nelisily.
+            var stavy = new[] { _chciHlas, _chciKlasiku, _podleCasu };
+
+            for (var i = 0; i < stavy.Length; i++)
+            {
+                if (i < _zatrzitka.Count) _zatrzitka[i].enabled = stavy[i];
+
+                if (i < _ramecky.Count)
+                    _ramecky[i].color = stavy[i] ? PanelStyle.TextPrimary : PanelStyle.Card;
+
+                if (i < _popisky.Count)
+                    _popisky[i].color = stavy[i]
+                        ? PanelStyle.TextPrimary
+                        : new Color(PanelStyle.TextSecondary.r, PanelStyle.TextSecondary.g,
+                            PanelStyle.TextSecondary.b, 0.7f);
+            }
+
+            if (_prazdnoText != null)
+            {
+                _prazdnoText.gameObject.SetActive(vybrane.Count == 0);
+                _prazdnoText.text = vse.Count == 0
+                    ? "zatím žádné uložené session"
+                    : "nic není vybráno";
+            }
+
+            // Sipky maji smysl jen tehdy, kdyz se seznam nevejde.
+            var vejdeSe = _rolovani != null && _rolovani.viewport != null
+                          && _obsah.sizeDelta.y <= _rolovani.viewport.rect.height;
+
+            if (_sipkaNahoru != null) _sipkaNahoru.SetActive(!vejdeSe);
+            if (_sipkaDolu != null) _sipkaDolu.SetActive(!vejdeSe);
+        }
+
+        /// <summary>
+        /// Datum a cas z nazvu souboru "P01_souhrn_20260918_204729.csv"
+        /// jako "18/9 20:47". Bez tecek - v tabulce se ctou jako konce vet.
+        /// </summary>
+        private static string Kdy(string soubor)
+        {
+            if (string.IsNullOrEmpty(soubor)) return "?";
+
+            var casti = soubor.Split('_');
+            if (casti.Length < 4) return soubor;
+
+            var d = casti[2];
+            var t = casti[3];
+            if (d.Length < 8 || t.Length < 6) return soubor;
+
+            int mesic, den;
+            if (!int.TryParse(d.Substring(4, 2), out mesic)) return soubor;
+            if (!int.TryParse(d.Substring(6, 2), out den)) return soubor;
+
+            return den + "/" + mesic + " " + t.Substring(0, 2) + ":" + t.Substring(2, 2);
         }
 
         private void ShowTable(string title, string table, string action, string second = null)
@@ -352,33 +958,71 @@ namespace BP.Core
             var prazdny = (_title == null || string.IsNullOrEmpty(_title.text))
                           && (_body == null || string.IsNullOrEmpty(_body.text));
 
-            var jmena = new[] { "ActionButton", "SecondButton", "ThirdButton", "FourthButton" };
+            var jmena = new[] { "ActionButton", "SecondButton", "ThirdButton", "FourthButton", "FifthButton" };
 
             if (prazdny)
             {
-                // Úvodní nabídka: tlačítka pod sebou. Vedle sebe by se tři
-                // nevešla čitelně a v brýlích se hůř míří na úzký obdélník
-                // než na široký řádek.
-                var krok = IntroButtonHeight + IntroButtonGap;
-                var horni = (jmena.Length - 1) * krok * 0.5f;
+                // UVODNI NABIDKA MA TRI PATRA PODLE VAHY.
+                //
+                // Nahore dve velka tlacitka mereni - to je jediny duvod, proc
+                // se aplikace spousti. Pod nimi mensi nacviky vedle sebe,
+                // protoze nacvik neni mereni a nema si rikat o stejnou
+                // pozornost. Uplne dole data. Dokud vypadalo pet tlacitek
+                // stejne, dalo se omylem spustit mereni misto nacviku.
+                var horni = h * 0.5f;
+                const float hlavni = 390f;
 
-                for (var i = 0; i < jmena.Length; i++)
-                {
-                    var rt = pr.Find(jmena[i]) as RectTransform;
-                    if (rt == null) continue;
+                Posadit(pr, jmena[0], new Vector2(0f, horni - 128f), hlavni, 58f);
+                Posadit(pr, jmena[1], new Vector2(0f, horni - 194f), hlavni, 58f);
 
-                    rt.sizeDelta = new Vector2(IntroButtonWidth, IntroButtonHeight);
-                    rt.anchoredPosition = new Vector2(0f, horni - i * krok);
+                // Mezera mezi měřením a nácvikem je VĚTŠÍ než mezi tlačítky
+                // uvnitř skupin. Bez toho vypadá pět tlačítek jako jeden
+                // seznam a rozdělení podle váhy se ztratí.
+                const float nacvikSirka = 189f;
+                Posadit(pr, jmena[2], new Vector2(-nacvikSirka * 0.5f - 6f, horni - 288f),
+                    nacvikSirka, 46f);
+                Posadit(pr, jmena[3], new Vector2(nacvikSirka * 0.5f + 6f, horni - 288f),
+                    nacvikSirka, 46f);
 
-                    var label = rt.Find("Label") as RectTransform;
-                    if (label != null) label.sizeDelta = rt.sizeDelta;
-                }
+                Posadit(pr, jmena[4], new Vector2(0f, horni - 350f), hlavni, 46f);
 
                 return;
             }
 
             // Ostatní obrazovky mají tlačítka v řádku u dolní hrany.
             RadaTlacitek(pr, w, h, 38f);
+        }
+
+        /// <summary>
+        /// Zruší objekt hned, ne až na konci snímku. Odložené Destroy by
+        /// nechalo starou kopii ve scéně ještě chvíli žít a Find by ji našel
+        /// místo nové.
+        /// </summary>
+        private static void Znicit(GameObject go)
+        {
+            // PŘEJMENOVAT PŘED ZRUŠENÍM. Destroy v play módu odkládá zánik
+            // na konec snímku, takže by Find ještě chvíli nacházel mrtvou
+            // kopii místo nové — a nová by se místo zobrazení schovala za ni.
+            go.name += "_mrtve";
+
+            if (Application.isPlaying) Destroy(go);
+            else DestroyImmediate(go);
+        }
+
+        private static void Posadit(RectTransform pr, string jmeno, Vector2 pos,
+            float w, float h)
+        {
+            var rt = pr.Find(jmeno) as RectTransform;
+            if (rt == null) return;
+
+            rt.sizeDelta = new Vector2(w, h);
+            rt.anchoredPosition = pos;
+
+            // POPISEK JE UŽŠÍ NEŽ TLAČÍTKO. Když má stejný rámeček, sahá text
+            // až na okraj a automatické zmenšování se zapne později, než je
+            // potřeba — písmo se pak dotýká zaoblených rohů.
+            var label = rt.Find("Label") as RectTransform;
+            if (label != null) label.sizeDelta = new Vector2(w - 28f, h - 8f);
         }
 
         /// <summary>
@@ -396,7 +1040,7 @@ namespace BP.Core
         {
             var viditelna = new List<RectTransform>();
 
-            foreach (var jmeno in new[] { "ActionButton", "SecondButton", "ThirdButton", "FourthButton" })
+            foreach (var jmeno in new[] { "ActionButton", "SecondButton", "ThirdButton", "FourthButton", "FifthButton" })
             {
                 var rt = pr.Find(jmeno) as RectTransform;
                 if (rt == null || !rt.gameObject.activeSelf) continue;
@@ -427,10 +1071,27 @@ namespace BP.Core
         }
 
         private void SetPanel(bool visible, string title, string body,
-            string action, string second = null, string third = null, string fourth = null)
+            string action, string second = null, string third = null, string fourth = null,
+            string fifth = null)
         {
             if (_panel != null) _panel.SetActive(visible);
             if (!visible) return;
+
+            // Rolovací plocha patří JEN přehledu. Každá jiná obrazovka ji
+            // schová a vrátí obyčejný Body — jinak by zůstala viset přes
+            // úvodní nabídku.
+            if (_panel != null)
+            {
+                var rig = _panel.transform.Find("Prehled");
+                if (rig != null && Current != Screen.AllResults) rig.gameObject.SetActive(false);
+
+                var hl = _panel.transform.Find("Hlavicka");
+                if (hl != null && Current != Screen.Intro) hl.gameObject.SetActive(false);
+
+                var pn = _panel.transform.Find("PopisNacviku");
+                if (pn != null && Current != Screen.Intro) pn.gameObject.SetActive(false);
+                if (_body != null && Current != Screen.AllResults) _body.gameObject.SetActive(true);
+            }
 
             if (_title != null) _title.text = title ?? "";
             if (_body != null) _body.text = body ?? "";
@@ -452,6 +1113,10 @@ namespace BP.Core
             var hasFourth = !string.IsNullOrEmpty(fourth);
             if (_fourthButton != null) _fourthButton.gameObject.SetActive(hasFourth);
             if (hasFourth && _fourthLabel != null) _fourthLabel.text = fourth;
+
+            var hasFifth = !string.IsNullOrEmpty(fifth);
+            if (_fifthButton != null) _fifthButton.gameObject.SetActive(hasFifth);
+            if (hasFifth && _fifthLabel != null) _fifthLabel.text = fifth;
         }
 
         private void OnSecondAction()
@@ -462,7 +1127,7 @@ namespace BP.Core
             // Bez něj se po dokončení session nedalo spustit nic dalšího
             // jinak než restartem aplikace — tlačítko tam jen přepínalo mezi
             // vlastní tabulkou a žebříčkem.
-            if (Current == Screen.SessionDone || Current == Screen.Ranking)
+            if (Current == Screen.SessionDone || Current == Screen.AllResults)
             {
                 ShowIntro();
                 return;
@@ -476,6 +1141,11 @@ namespace BP.Core
         private void OnThirdAction() => SpustitTutorial(false);
 
         private void OnFourthAction() => SpustitTutorial(true);
+
+        private void OnFifthAction()
+        {
+            if (Current == Screen.Intro) ShowAllResults();
+        }
 
         private void SpustitTutorial(bool hlasem)
         {
@@ -492,14 +1162,11 @@ namespace BP.Core
 
             switch (Current)
             {
-                // Na konci session už není co spouštět, tlačítko tam přepíná
-                // mezi vlastními výsledky a žebříčkem.
+                // Na konci session i v přehledu vede akce zpátky do nabídky —
+                // není co dalšího spouštět.
                 case Screen.SessionDone:
-                    ShowRanking();
-                    return;
-
-                case Screen.Ranking:
-                    ShowResults();
+                case Screen.AllResults:
+                    ShowIntro();
                     return;
 
                 // Z úvodu se session teprve zakládá — a musí se přitom říct,
@@ -572,6 +1239,18 @@ namespace BP.Core
                 {
                     _fourthButton.onClick.RemoveAllListeners();
                     _fourthButton.onClick.AddListener(OnFourthAction);
+                }
+            }
+
+            var btn5 = p.Find("FifthButton");
+            if (btn5 != null)
+            {
+                _fifthButton = btn5.GetComponent<Button>();
+                _fifthLabel = Get(btn5, "Label");
+                if (_fifthButton != null)
+                {
+                    _fifthButton.onClick.RemoveAllListeners();
+                    _fifthButton.onClick.AddListener(OnFifthAction);
                 }
             }
 
@@ -654,6 +1333,8 @@ namespace BP.Core
                 IntroButtonWidth, IntroButtonHeight, thirdButtonColor);
             Tlacitko(pr, "FourthButton", new Vector2(0f, y),
                 IntroButtonWidth, IntroButtonHeight, fourthButtonColor);
+            Tlacitko(pr, "FifthButton", new Vector2(0f, y),
+                IntroButtonWidth, IntroButtonHeight, fifthButtonColor);
 
         }
 

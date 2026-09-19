@@ -19,7 +19,7 @@ MonoBehaviour:
     width: 1704
     height: 967.3334
   m_ShowMode: 4
-  m_Title: Inspector
+  m_Title: Scene
   m_RootView: {fileID: 2}
   m_MinSize: {x: 875, y: 300}
   m_MaxSize: {x: 10000, y: 10000}
@@ -98,7 +98,7 @@ MonoBehaviour:
   m_MinSize: {x: 300, y: 112}
   m_MaxSize: {x: 24288, y: 16192}
   vertical: 0
-  controlID: 111
+  controlID: 16
   draggingID: 0
 --- !u!114 &5
 MonoBehaviour:
@@ -191,7 +191,7 @@ MonoBehaviour:
     x: 0
     y: 0
     width: 1312
-    height: 548
+    height: 310
   m_MinSize: {x: 201, y: 226}
   m_MaxSize: {x: 4001, y: 4026}
   m_ActualView: {fileID: 16}
@@ -218,13 +218,13 @@ MonoBehaviour:
   m_Position:
     serializedVersion: 2
     x: 0
-    y: 548
+    y: 310
     width: 1312
-    height: 363.3333
+    height: 601.3333
   m_MinSize: {x: 200, y: 56}
   m_MaxSize: {x: 16192, y: 8096}
   vertical: 0
-  controlID: 54
+  controlID: 27
   draggingID: 0
 --- !u!114 &10
 MonoBehaviour:
@@ -243,8 +243,8 @@ MonoBehaviour:
     serializedVersion: 2
     x: 0
     y: 0
-    width: 655.3333
-    height: 363.3333
+    width: 654.6667
+    height: 601.3333
   m_MinSize: {x: 201, y: 226}
   m_MaxSize: {x: 4001, y: 4026}
   m_ActualView: {fileID: 17}
@@ -267,10 +267,10 @@ MonoBehaviour:
   m_Children: []
   m_Position:
     serializedVersion: 2
-    x: 655.3333
+    x: 654.6667
     y: 0
-    width: 656.6667
-    height: 363.3333
+    width: 657.3333
+    height: 601.3333
   m_MinSize: {x: 232, y: 276}
   m_MaxSize: {x: 10002, y: 10026}
   m_ActualView: {fileID: 14}
@@ -536,6 +536,20 @@ MonoBehaviour:
       layout: 4
       size: {x: 0, y: 0}
       sizeOverridden: 0
+    - dockPosition: 1
+      containerId: overlay-toolbar__top
+      displayed: 0
+      id: Services/Environment
+      index: 8
+      contents: '{"m_Layout":4,"m_Collapsed":false,"m_Folded":false,"m_Floating":false,"m_FloatingSnapOffset":{"x":0.0,"y":0.0},"m_SnapOffsetDelta":{"x":0.0,"y":0.0},"m_FloatingSnapCorner":0,"m_Size":{"x":0.0,"y":0.0},"m_SizeOverridden":false}'
+      floating: 0
+      collapsed: 0
+      snapOffset: {x: 0, y: 0}
+      snapOffsetDelta: {x: 0, y: 0}
+      snapCorner: 0
+      layout: 4
+      size: {x: 0, y: 0}
+      sizeOverridden: 0
     m_ContainerData:
     - containerId: overlay-toolbar__top
       scrollOffset: 0
@@ -621,10 +635,10 @@ MonoBehaviour:
     m_TextWithWhitespace: "Project\u200B"
   m_Pos:
     serializedVersion: 2
-    x: 656.3333
+    x: 655.6667
     y: 24
-    width: 654.6667
-    height: 337.3333
+    width: 655.3333
+    height: 575.3333
   m_SerializedDataModeController:
     m_DataMode: 0
     m_PreferredDataMode: 0
@@ -675,23 +689,23 @@ MonoBehaviour:
       m_rawData: 568105584918862332
     m_ExpandedIDs:
     - m_rawData: 0
-    - m_rawData: 568105584918873644
-    - m_rawData: 568105584918873646
-    - m_rawData: 568105584918873648
-    - m_rawData: 568105584918873650
-    - m_rawData: 568105584918873652
-    - m_rawData: 568105584918873654
-    - m_rawData: 568105584918873656
-    - m_rawData: 568105584918873658
-    - m_rawData: 568105584918873660
-    - m_rawData: 568105584918873662
-    - m_rawData: 568105584918873664
-    - m_rawData: 568105584918873666
-    - m_rawData: 568105584918873668
-    - m_rawData: 568105584918873670
-    - m_rawData: 568105584918873672
-    - m_rawData: 568105584918873674
-    - m_rawData: 568105584918873676
+    - m_rawData: 568105584918873762
+    - m_rawData: 568105584918873764
+    - m_rawData: 568105584918873766
+    - m_rawData: 568105584918873768
+    - m_rawData: 568105584918873770
+    - m_rawData: 568105584918873772
+    - m_rawData: 568105584918873774
+    - m_rawData: 568105584918873776
+    - m_rawData: 568105584918873778
+    - m_rawData: 568105584918873780
+    - m_rawData: 568105584918873782
+    - m_rawData: 568105584918873784
+    - m_rawData: 568105584918873786
+    - m_rawData: 568105584918873788
+    - m_rawData: 568105584918873790
+    - m_rawData: 568105584918873792
+    - m_rawData: 568105584918873794
     m_RenameOverlay:
       m_UserAcceptedRename: 0
       m_Name: 
@@ -725,23 +739,23 @@ MonoBehaviour:
       m_rawData: 0
     m_ExpandedIDs:
     - m_rawData: 0
-    - m_rawData: 568105584918873644
-    - m_rawData: 568105584918873646
-    - m_rawData: 568105584918873648
-    - m_rawData: 568105584918873650
-    - m_rawData: 568105584918873652
-    - m_rawData: 568105584918873654
-    - m_rawData: 568105584918873656
-    - m_rawData: 568105584918873658
-    - m_rawData: 568105584918873660
-    - m_rawData: 568105584918873662
-    - m_rawData: 568105584918873664
-    - m_rawData: 568105584918873666
-    - m_rawData: 568105584918873668
-    - m_rawData: 568105584918873670
-    - m_rawData: 568105584918873672
-    - m_rawData: 568105584918873674
-    - m_rawData: 568105584918873676
+    - m_rawData: 568105584918873762
+    - m_rawData: 568105584918873764
+    - m_rawData: 568105584918873766
+    - m_rawData: 568105584918873768
+    - m_rawData: 568105584918873770
+    - m_rawData: 568105584918873772
+    - m_rawData: 568105584918873774
+    - m_rawData: 568105584918873776
+    - m_rawData: 568105584918873778
+    - m_rawData: 568105584918873780
+    - m_rawData: 568105584918873782
+    - m_rawData: 568105584918873784
+    - m_rawData: 568105584918873786
+    - m_rawData: 568105584918873788
+    - m_rawData: 568105584918873790
+    - m_rawData: 568105584918873792
+    - m_rawData: 568105584918873794
     m_RenameOverlay:
       m_UserAcceptedRename: 0
       m_Name: 
@@ -770,9 +784,9 @@ MonoBehaviour:
       m_ResourceFile: 
   m_ListAreaState:
     m_SelectedInstanceIDs:
-    - m_rawData: 568105584918864660
+    - m_rawData: 568105584918903964
     m_LastClickedEntityId:
-      m_rawData: 568105584918864660
+      m_rawData: 568105584918903964
     m_HadKeyboardFocusLastEvent: 0
     m_ExpandedInstanceIDs: []
     m_RenameOverlay:
@@ -801,7 +815,7 @@ MonoBehaviour:
       m_Icon: {fileID: 0}
       m_ResourceFile: 
     m_NewAssetIndexInList: -1
-    m_ScrollPosition: {x: 0, y: 9.666626}
+    m_ScrollPosition: {x: 0, y: 0}
     m_GridSize: 64
   m_SkipHiddenPackages: 0
   m_DirectoriesAreaWidth: 115
@@ -934,7 +948,7 @@ MonoBehaviour:
     x: 0
     y: 24
     width: 1311
-    height: 522
+    height: 284
   m_SerializedDataModeController:
     m_DataMode: 0
     m_PreferredDataMode: 0
@@ -1370,9 +1384,9 @@ MonoBehaviour:
   m_AudioPlay: 0
   m_DebugDrawModesUseInteractiveLightBakingData: 0
   m_Position:
-    m_Target: {x: -0.8415761, y: 0.26010683, z: 1.1945112}
+    m_Target: {x: -0.8927539, y: 0.34586212, z: 1.2244724}
     speed: 2
-    m_Value: {x: -0.8415761, y: 0.26010683, z: 1.1945112}
+    m_Value: {x: -0.8927539, y: 0.34586212, z: 1.2244724}
   m_RenderMode: 0
   m_CameraMode:
     drawMode: 0
@@ -1423,9 +1437,9 @@ MonoBehaviour:
     speed: 2
     m_Value: {x: -0.256322, y: 0.2396097, z: -0.065749384, w: -0.93411356}
   m_Size:
-    m_Target: 0.87275606
+    m_Target: 5.1369147
     speed: 2
-    m_Value: 0.87275606
+    m_Value: 5.1369147
   m_Ortho:
     m_Target: 0
     speed: 2
@@ -1484,8 +1498,8 @@ MonoBehaviour:
     serializedVersion: 2
     x: 0
     y: 24
-    width: 654.3333
-    height: 337.3333
+    width: 653.6667
+    height: 575.3333
   m_SerializedDataModeController:
     m_DataMode: 0
     m_PreferredDataMode: 0
@@ -1508,7 +1522,27 @@ MonoBehaviour:
       m_LastClickedID:
         m_rawData: 0
       m_ExpandedIDs:
+      - m_rawData: 568105589213291502
+      - m_rawData: 568105589213291514
+      - m_rawData: 568105589213701910
+      - m_rawData: 568105589213705114
+      - m_rawData: 568105589213705538
+      - m_rawData: 568105589213707838
+      - m_rawData: 568105589213712600
+      - m_rawData: 568105589213715804
+      - m_rawData: 568105589213716224
+      - m_rawData: 568105589213718532
+      - m_rawData: 568105589213745678
+      - m_rawData: 568105589213748882
+      - m_rawData: 568105589213749302
+      - m_rawData: 568105589213751560
       - m_rawData: 568105589213756020
+      - m_rawData: 568105584918903966
+      - m_rawData: 568105584918905234
+      - m_rawData: 568105584918905374
+      - m_rawData: 568105584918906552
+      - m_rawData: 568105584918906618
+      - m_rawData: 568105584918907584
       m_RenameOverlay:
         m_UserAcceptedRename: 0
         m_Name: 

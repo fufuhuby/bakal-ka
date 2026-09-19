@@ -30,6 +30,17 @@ namespace BP.Input
     /// </summary>
     public class VoiceHelpPanel : MonoBehaviour
     {
+        [Header("Hlasový zdroj")]
+        [Tooltip("Z něj se berou hlášky do stavového okénka. Bez něj okénko " +
+                 "zůstane prázdné, ale okno jinak funguje.")]
+        [SerializeField] private VoiceRequestSource voice;
+
+        [Tooltip("Ukazovat i naměřená čísla (hlasitost, šum, práh, časy).\n\n" +
+                 "PŘI MĚŘENÍ VYPNOUT. Participant nemá co ladit a čísla ho " +
+                 "budou svádět k tomu, aby si hlasitost přizpůsoboval — což " +
+                 "je přesně ta proměnná, kterou měříme.")]
+        [SerializeField] private bool zobrazitLadeni = true;
+
         [Header("Zdroj tvarů a barev")]
         [Tooltip("Tatáž knihovna, ze které bere ikony inventář.")]
         [SerializeField] private ShapeLibrary library;
@@ -80,6 +91,76 @@ namespace BP.Input
         private bool _usesSizes;
         private bool _planOnDemand;
         private Transform _grip;
+
+        private void OnEnable()
+        {
+            if (voice == null) return;
+            voice.StatusChanged += NaStav;
+            voice.DebugChanged += NaLadeni;
+        }
+
+        private void OnDisable()
+        {
+            if (voice == null) return;
+            voice.StatusChanged -= NaStav;
+            voice.DebugChanged -= NaLadeni;
+        }
+
+        /// <summary>
+        /// Co aplikace slyšela, nebo proč povel neprošel.
+        ///
+        /// PROČ TO TU VŮBEC JE: v klasické podmínce participant pořád vidí,
+        /// co má vybrané a co mu chybí. U hlasu neviděl nic — když se povel
+        /// nepovedl, stál a nevěděl, jestli ho aplikace neslyšela, jestli
+        /// řekl něco špatně, nebo jestli se to zaseklo. Ta nerovnost nemá
+        /// s modalitou nic společného a do měřeného rozdílu nepatří.
+        /// </summary>
+        private void NaStav(string text)
+        {
+            if (_stavText == null) return;
+            _stavText.text = string.IsNullOrEmpty(text) ? "poslouchám…" : text;
+        }
+
+        private void NaLadeni(string text)
+        {
+            if (_ladeniText == null) return;
+            _ladeniText.text = zobrazitLadeni ? text : "";
+        }
+
+        private TextMeshProUGUI _stavText;
+        private TextMeshProUGUI _ladeniText;
+
+        /// <summary>Výška stavového pruhu pod povely.</summary>
+        private float VyskaStavu => zobrazitLadeni ? 96f : 56f;
+
+        private float Stav(float y, float vnitrek)
+        {
+            y += SectionGap;
+
+            var vyska = VyskaStavu;
+            var karta = Novy("Stav", _canvas, new Vector2(0f, -(y + vyska * 0.5f)),
+                new Vector2(vnitrek, vyska));
+            PanelStyle.ApplyRounded(karta.AddComponent<Image>(), 16f, PanelStyle.Card);
+
+            var rt = (RectTransform)karta.transform;
+
+            var hlavni = Text(Novy("Text", rt, new Vector2(0f, zobrazitLadeni ? 22f : 0f),
+                new Vector2(vnitrek - 32f, 30f)), 18f,
+                TextAlignmentOptions.Center, PanelStyle.TextPrimary);
+            hlavni.text = "poslouchám…";
+            _stavText = hlavni;
+
+            if (zobrazitLadeni)
+            {
+                var detail = Text(Novy("Ladeni", rt, new Vector2(0f, -18f),
+                    new Vector2(vnitrek - 32f, 46f)), 13f,
+                    TextAlignmentOptions.Center, PanelStyle.TextSecondary);
+                detail.text = "";
+                _ladeniText = detail;
+            }
+
+            return y + vyska;
+        }
 
         private void Awake()
         {
@@ -199,6 +280,9 @@ namespace BP.Input
             y += SectionGap;
             y = Sekce("DALŠÍ POVELY", y, vnitrek);
             y = Povely(y, vnitrek);
+
+            // ---- Co aplikace slyší ----
+            y = Stav(y, vnitrek);
 
             var celkovaVyska = Dokoncit(y);
             PostavitListu(celkovaVyska);

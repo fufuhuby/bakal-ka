@@ -159,6 +159,12 @@ namespace BP.Core
             _prvniBylSpatny = false;
 
             if (hlasem) VybratSpatnyObjekt();
+
+            // Terče chodí v tutoriálu častěji. Nepravidelná dlouhá pauza dává
+            // smysl v měření, kde má terč rušit; tady se člověk teprve učí,
+            // že se na něj sahá, a patnáct vteřin čekání vypadá jako porucha.
+            if (secondaryTask != null) secondaryTask.SetTutorialTempo(true);
+
             _faze = Faze.Uvod;
             Zobrazit(true);
             ZobrazitCeduli(true);
@@ -309,6 +315,11 @@ namespace BP.Core
             _faze = Faze.Neaktivni;
             Zobrazit(false);
             ZobrazitCeduli(false);
+
+            // Zrychlené terče patří JEN do tutoriálu. Kdyby zůstaly zapnuté,
+            // běžel by měřený blok s jinou zátěží než ostatní a dual-task
+            // cost by se nedal porovnávat.
+            if (secondaryTask != null) secondaryTask.SetTutorialTempo(false);
 
             // Menu se MUSÍ odemknout, i když tutoriál skončí předčasně
             // (přeskočením přes vývojářský panel) — jinak by do měřeného

@@ -47,6 +47,25 @@ namespace BP.Secondary
         [Tooltip("Prodleva před první aktivací, ať se participant nejdřív rozkoukná.")]
         [SerializeField] private float initialDelay = 6f;
 
+        [Header("Tutoriál")]
+        [Tooltip("Prodlevy v tutoriálu. V měřených blocích je dlouhá pauza " +
+                 "žádoucí — terč má rušit nepravidelně a nepředvídatelně. " +
+                 "V tutoriálu se ale participant teprve učí, že se na terč " +
+                 "sahá, a čekat na druhý terč až patnáct vteřin znamená stát " +
+                 "a nevědět, jestli se něco nepokazilo.")]
+        [SerializeField] private float tutorialMinInterval = 3f;
+
+        [SerializeField] private float tutorialMaxInterval = 5f;
+
+        /// <summary>Běží zrychlené prodlevy pro tutoriál?</summary>
+        private bool _tutorialTempo;
+
+        /// <summary>
+        /// Zapne zrychlené prodlevy. Volá TutorialGuide při startu a vypíná
+        /// je na konci, aby měřené bloky běžely na původních hodnotách.
+        /// </summary>
+        public void SetTutorialTempo(bool value) => _tutorialTempo = value;
+
         [Header("Reprodukovatelnost")]
         [Tooltip("Seed sekvence. Stejný seed = stejné pořadí terčů. " +
                  "Nastavuje TrialManager z ID participanta.")]
@@ -283,7 +302,11 @@ namespace BP.Secondary
             // v ruce neco jineho nez v bloku predchozim.
             RefreshTouchers();
 
-            _nextActivation = Time.realtimeSinceStartup + initialDelay;
+            // I první terč přijde v tutoriálu dřív — čekat na úvodní prodlevu
+            // se stejnou trpělivostí jako v měření nemá smysl, když se
+            // participant teprve učí, co má dělat.
+            _nextActivation = Time.realtimeSinceStartup
+                + (_tutorialTempo ? tutorialMinInterval : initialDelay);
             IsRunning = true;
         }
 
@@ -387,9 +410,12 @@ namespace BP.Secondary
 
         private void ScheduleNext()
         {
-            var span = maxInterval - minInterval;
+            var min = _tutorialTempo ? tutorialMinInterval : minInterval;
+            var max = _tutorialTempo ? tutorialMaxInterval : maxInterval;
+
+            var span = max - min;
             var offset = span > 0f ? (float)_random.NextDouble() * span : 0f;
-            _nextActivation = Time.realtimeSinceStartup + minInterval + offset;
+            _nextActivation = Time.realtimeSinceStartup + min + offset;
         }
 
         private void OnHit(SecondaryTarget target, float reactionTime)

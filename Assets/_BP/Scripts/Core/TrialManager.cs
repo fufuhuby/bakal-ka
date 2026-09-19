@@ -293,8 +293,36 @@ namespace BP.Core
         private InputAction _triggerTargetAction;
         private InputAction _toggleSecondaryAction;
 
+        /// <summary>
+        /// ID participanta, pod kterým se ukládají data. Nastavuje se
+        /// z úvodní nabídky, protože zapomenuté ID je nejdražší chyba, jakou
+        /// při měření můžeš udělat: data se smíchají s cizími a rozdělit
+        /// zpátky už nejdou.
+        /// </summary>
+        public string ParticipantId => participantId;
+
+        private const string KlicId = "BP_participantId";
+
+        public void SetParticipantId(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return;
+
+            participantId = value;
+
+            // PŘEŽIJE RESTART APLIKACE. Hodnota ze scény by se po každém
+            // spuštění vrátila na P01 a měřilo by se pod cizím ID, aniž by
+            // si toho kdokoli všiml.
+            PlayerPrefs.SetString(KlicId, value);
+            PlayerPrefs.Save();
+
+            BuildOrder();
+        }
+
         private void Awake()
         {
+            var ulozene = PlayerPrefs.GetString(KlicId, "");
+            if (!string.IsNullOrEmpty(ulozene)) participantId = ulozene;
+
             BuildOrder();
             NapojitHlas();
         }
@@ -1035,12 +1063,18 @@ namespace BP.Core
             // Sloupec navíc místo toho nese, ČÍM SE BLOKY LIŠÍ — bez toho
             // vypadá první řádek nevysvětlitelně nejlepší, přestože v něm
             // participant jenom stavěl a nic ho nerušilo.
-            sb.Append(Pad("Blok", 7)).Append(Pad("Úloha", 21)).Append(Pad("Čas", 11))
+            // DVA ČASY VEDLE SEBE. „Čistý" je doba stavby, „s postihy" k ní
+            // přičítá pět vteřin za každý minutý terč — tedy to, co
+            // participantovi běželo na časomíře. Vedle sebe je z nich hned
+            // vidět, kolik ho stálo rozdělení pozornosti; samotný součet by
+            // to schoval a samotný čistý čas by to zamlčel.
+            sb.Append(Pad("Blok", 7)).Append(Pad("Úloha", 21))
+              .Append(Pad("Čistý čas", 12)).Append(Pad("S postihy", 12))
               .Append(Pad("Chyby", 8)).Append(Pad("Terče", 9)).Append(Pad("Reakce", 10))
               .Append("Plánek")
               .AppendLine();
 
-            sb.AppendLine(new string('-', 72));
+            sb.AppendLine(new string('-', 84));
 
             // Bloky se čísluji od jedné v rámci tabulky, ne podle pořadí
             // v session — po vynechání tréninku by jinak začínala dvojkou.
@@ -1058,7 +1092,8 @@ namespace BP.Core
 
                 sb.Append(Pad((i + 1).ToString(), 7))
                   .Append(Pad(uloha, 21))
-                  .Append(Pad(BlockTimer.Format(r.rawTime), 11))
+                  .Append(Pad(BlockTimer.Format(r.rawTime), 12))
+                  .Append(Pad(BlockTimer.Format(r.rawTime + r.penaltyTime), 12))
                   .Append(Pad(r.wrongObjects.ToString(), 8))
                   .Append(Pad(r.secondaryRan ? r.hits + "/" + r.activations : "—", 9))
                   .Append(Pad(r.secondaryRan && r.hits > 0
@@ -1073,11 +1108,14 @@ namespace BP.Core
         // ---- Zebricek napric ulozenymi session ----
 
         /// <summary>
-        /// Precte souhrnne soubory vsech drivejsich session a slozi z nich
-        /// zebricek. Cte se z disku, ne z pameti — jinak by zebricek existoval
-        /// jen do zavreni aplikace a po restartu headsetu by byl prazdny.
+        /// Přečte souhrnné soubory všech dřívějších session. Čte se z disku,
+        /// ne z paměti — jinak by přehled existoval jen do zavření aplikace
+        /// a po restartu headsetu by byl prázdný.
+        ///
+        /// NIC SE NESLUČUJE ANI NEFILTRUJE. Řazení i výběr si dělá obrazovka,
+        /// která to zobrazuje; tady jde jen o to, co je na disku.
         /// </summary>
-        public List<SessionScore> ReadRanking()
+        public List<SessionScore> ReadAllSessions()
         {
             var vysledek = new List<SessionScore>();
 
@@ -1094,50 +1132,10 @@ namespace BP.Core
             }
             catch (Exception e)
             {
-                Debug.LogError("[TrialManager] Žebříček se nepodařilo načíst: " + e.Message);
-                return vysledek;
+                Debug.LogError("[TrialManager] Výsledky se nepodařilo načíst: " + e.Message);
             }
 
-            // Dokoncene napred. Nedokoncena session ma kratsi cas prave proto,
-            // ze nebyla dokoncena, a jinak by se vyhoupla na spicku zebricku.
-            Comparison<SessionScore> lepsi = (a, b) =>
-            {
-                if (a.complete != b.complete) return a.complete ? -1 : 1;
-                return a.TotalTime.CompareTo(b.TotalTime);
-            };
-
-            // Z kazdeho participanta jen jeho nejlepsi session — jinak by
-            // ten, kdo prisel dvakrat, obsadil zebricek sam.
-            //
-            // VYBIRA SE STEJNYM PRAVIDLEM JAKO SE RADI, ne podle nejkratsiho
-            // casu. Pri porovnani jen casu vyhrala uvnitr participanta
-            // session, ktera se prerusila po par vterinach, a zastinila
-            // jeho dokoncene pokusy — v zebricku pak stal jediny radek
-            // "— P01 0:00,0", i kdyz mel ulozenych trinact dohranych session.
-            // KLIC JE PARTICIPANT A PODMINKA, ne jen participant. Hlasovou
-            // a klasickou verzi hraje tyz clovek ve dvou session; pri klici
-            // jen podle participanta by si jeho dva vysledky pretloukly
-            // a jeden by ze zebricku zmizel.
-            var nejlepsi = new Dictionary<string, SessionScore>();
-            foreach (var s in vysledek)
-            {
-                var klic = (s.participantId ?? "?") + "|" + s.condition;
-                SessionScore drivejsi;
-                if (!nejlepsi.TryGetValue(klic, out drivejsi) || lepsi(s, drivejsi) < 0)
-                    nejlepsi[klic] = s;
-            }
-
-            // RADI SE UVNITR PODMINKY, ne pres obe dohromady. Hlasova
-            // a klasicka verze jsou jina uloha; spolecne poradi by tvrdilo,
-            // ze je jeden cas lepsi nez druhy, i kdyz merí neco jineho —
-            // presne ten rozdil je pritom zkoumana promenna.
-            var seznam = new List<SessionScore>(nejlepsi.Values);
-            seznam.Sort((a, b) =>
-            {
-                if (a.condition != b.condition) return a.condition.CompareTo(b.condition);
-                return lepsi(a, b);
-            });
-            return seznam;
+            return vysledek;
         }
 
         private static SessionScore ParseSummary(string cesta)
@@ -1185,64 +1183,6 @@ namespace BP.Core
         {
             float v;
             return float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out v) ? v : 0f;
-        }
-
-        /// <summary>
-        /// Tabulka zebricku. Nedokoncene session se ukazuji, ale mimo poradi —
-        /// schovat je uplne by budilo dojem, ze se ztratila data.
-        /// </summary>
-        public string BuildRankingTable(int limit = 8)
-        {
-            var vse = ReadRanking();
-            if (vse.Count == 0) return "Zatím žádné uložené session.";
-
-            var sb = new StringBuilder();
-
-            sb.Append(Pad("#", 4)).Append(Pad("Úloha", 11)).Append(Pad("Participant", 13))
-              .Append(Pad("Celkem", 10)).Append(Pad("Chyby", 8)).Append(Pad("Postihy", 9))
-              .Append("Terče")
-              .AppendLine();
-
-            sb.AppendLine(new string('-', 60));
-
-            // Poradi se pocita ZVLAST PRO KAZDOU PODMINKU, protoze se v ni
-            // taky zvlast radilo. Prubezne cislovani pres celou tabulku by
-            // druhou skupinu zacalo treba petkou a vypadalo by to, ze jsou
-            // obe podminky v jednom poradi.
-            var poradi = 0;
-            var ukazano = 0;
-            var predchozi = (InteractionCondition?)null;
-
-            foreach (var s2 in vse)
-            {
-                if (ukazano++ >= limit) break;
-
-                if (predchozi != s2.condition)
-                {
-                    // Prazdny radek mezi podminkami. Bez nej vypada tabulka
-                    // jako jedno poradi, ve kterem se dvakrat zacina jednickou.
-                    if (predchozi != null) sb.AppendLine();
-                    predchozi = s2.condition;
-                    poradi = 0;
-                }
-
-                // Nedokončená session dostane pomlčku místo pořadí. Krátký čas
-                // má právě proto, že nebyla dokončena, takže by jinak vyhrála.
-                var znacka = s2.complete ? (++poradi) + "." : "—";
-
-                sb.Append(Pad(znacka, 4))
-                  .Append(Pad(s2.condition == InteractionCondition.Voice
-                      ? "hlasová" : "klasická", 11))
-                  .Append(Pad(s2.participantId ?? "?", 13))
-                  .Append(Pad(BlockTimer.Format(s2.TotalTime), 10))
-                  .Append(Pad(s2.wrongObjects + "×", 8))
-                  .Append(Pad(s2.penaltyCount + "×", 9))
-                  .Append(s2.activations > 0
-                      ? Mathf.RoundToInt(s2.HitRate * 100f) + "%" : "—")
-                  .AppendLine();
-            }
-
-            return sb.ToString();
         }
 
         private static string Pad(string value, int width)
