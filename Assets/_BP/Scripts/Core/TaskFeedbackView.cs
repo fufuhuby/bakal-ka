@@ -39,14 +39,40 @@ namespace BP.Core
                  "Nemusí to být každý frame.")]
         [SerializeField] private float snapCheckInterval = 0.06f;
 
-        [Tooltip("Zobrazovat instrukci a výsledek u terčů. Pro zkoušení zapnuto; " +
-                 "při měření VYPNOUT — instrukci má participant dostat v tréninku, " +
-                 "ne ji během měřeného bloku číst z panelu.")]
+        [Tooltip("Psát k terčům do inventáře instrukci a výsledek. " +
+                 "Platí JEN V TUTORIÁLU — v měřeném bloku se nápověda " +
+                 "nezobrazí ani se zapnutým přepínačem.")]
         [SerializeField] private bool showSecondaryInstruction = true;
 
         private int _shownStep = -1;
         private bool _snapReady;
         private float _nextSnapCheck;
+
+        // Průvodce session. Dohledává se za běhu — kvůli jedinému příznaku
+        // (běží tutoriál?) by bylo škoda tahat do scény další odkaz, který
+        // se dá zapomenout přiřadit.
+        private TrialManager _trial;
+
+        /// <summary>
+        /// Smí se k terčům psát nápověda do inventáře?
+        ///
+        /// JEN V TUTORIÁLU. V měřeném bloku je to instrukce navíc, kterou
+        /// participant čte místo toho, aby stavěl — a protože ji čte pokaždé
+        /// jinak dlouho, přelije se to rovnou do completion time, tedy do
+        /// hlavní závislé proměnné. Co se s terčem dělá, se má naučit
+        /// v nácviku; v bloku už to má vědět.
+        ///
+        /// Velká hláška v pozadí (ZÁSAH / POZDĚ) zůstává v obou případech —
+        /// ta je zpětná vazba k výkonu, ne návod, a je v obou podmínkách
+        /// stejná.
+        /// </summary>
+        private bool Napovidat => showSecondaryInstruction
+                                  && (_trial == null || _trial.TutorialRunning);
+
+        private void Awake()
+        {
+            _trial = FindFirstObjectByType<TrialManager>(FindObjectsInactive.Include);
+        }
 
         // Sleduje se i verze stavby šablony, ne jen číslo kroku. Na začátku
         // bloku se šablona postaví znovu s čistými materiály, ale krok zůstane
@@ -101,21 +127,21 @@ namespace BP.Core
         /// </summary>
         private void OnTargetActivated(SecondaryTarget target)
         {
-            if (menuPanel == null || !showSecondaryInstruction) return;
+            if (menuPanel == null || !Napovidat) return;
             menuPanel.ShowNotice("DOTKNI SE ČERVENÉHO TERČE", true);
         }
 
         private void OnTargetHit(SecondaryTarget target, float reactionTime)
         {
             if (banner != null) banner.ShowPositive("ZÁSAH");
-            if (menuPanel == null || !showSecondaryInstruction) return;
+            if (menuPanel == null || !Napovidat) return;
             menuPanel.ShowNotice("ZÁSAH  " + reactionTime.ToString("F2") + " s");
         }
 
         private void OnTargetMissed(SecondaryTarget target)
         {
             if (banner != null) banner.ShowNegative("POZDĚ");
-            if (menuPanel == null || !showSecondaryInstruction) return;
+            if (menuPanel == null || !Napovidat) return;
             menuPanel.ShowNotice("POZDĚ");
         }
 

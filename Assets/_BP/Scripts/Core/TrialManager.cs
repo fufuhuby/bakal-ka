@@ -244,7 +244,17 @@ namespace BP.Core
         public int CurrentBlockIndex { get; private set; } = -1;
 
         public bool BlockRunning { get; private set; }
+
+        private BlockDefinition _pripravenyBlok;
+        private bool _cekaNaStart;
         public bool SessionComplete => CurrentBlockIndex >= _order.Count;
+
+        /// <summary>
+        /// Blok je nachystaný a čeká se, až participant potvrdí, že je
+        /// připravený. Pracoviště i ovládání jsou vidět, předloha ne a čas
+        /// neběží.
+        /// </summary>
+        public event Action<BlockDefinition, int> BlockReady;
 
         public event Action<BlockDefinition, int> BlockStarted;
         public event Action<BlockDefinition, int> BlockEnded;
@@ -332,13 +342,13 @@ namespace BP.Core
             if (!controllerControl) return;
 
             _recenterAction = Bind("BP_Recenter", "<XRController>{LeftHand}/primaryButton",
-                RecenterWorkspace);
+                MimoBlok(RecenterWorkspace));
             _nextBlockAction = Bind("BP_NextBlock", "<XRController>{LeftHand}/secondaryButton",
-                StartNextBlock);
+                MimoBlok(StartNextBlock));
             _triggerTargetAction = Bind("BP_Target", "<XRController>{RightHand}/primaryButton",
-                TriggerSecondaryTargetForTesting);
+                MimoBlok(TriggerSecondaryTargetForTesting));
             _toggleSecondaryAction = Bind("BP_Secondary", "<XRController>{RightHand}/secondaryButton",
-                ToggleSecondaryTaskForTesting);
+                MimoBlok(ToggleSecondaryTaskForTesting));
         }
 
         private void OnDisable()
@@ -347,6 +357,36 @@ namespace BP.Core
             Unbind(ref _nextBlockAction);
             Unbind(ref _triggerTargetAction);
             Unbind(ref _toggleSecondaryAction);
+        }
+
+        /// <summary>
+        /// Obalí operátorskou zkratku tak, aby během bloku neudělala nic.
+        ///
+        /// PROČ TO MUSÍ BÝT: A/B/X/Y na ovladačích jsou zkratky pro zkoušení
+        /// v headsetu — přecentrovat pracoviště, rozsvítit terč, zapnout
+        /// a vypnout sekundární úlohu, další blok. Jenže během bloku má
+        /// participant obě ruce v úloze a mačká je omylem.
+        ///
+        /// V měření 19. 9. to stálo celý blok: v čase 1:09 se tlačítkem
+        /// vypnula sekundární úloha a do konce bloku, tedy další téměř dvě
+        /// minuty, se nerozsvítil jediný terč. Předtím se ve stejném bloku
+        /// jedenáctkrát přecentrovalo pracoviště. Takový blok se do dat
+        /// počítat nedá — a přitom na něm zvenčí není nic vidět.
+        ///
+        /// Klávesnice zůstává beze změny: u ní sedí operátor, ne participant.
+        /// </summary>
+        private Action MimoBlok(Action akce)
+        {
+            return () =>
+            {
+                if (BlockRunning || _cekaNaStart)
+                {
+                    Debug.Log("[TrialManager] Zkratka na ovladači je během bloku vypnutá.");
+                    return;
+                }
+
+                akce();
+            };
         }
 
         private static InputAction Bind(string name, string path, Action callback)
@@ -374,6 +414,13 @@ namespace BP.Core
 
             // Na úvodní obrazovce je vidět jen instrukce.
             SetWorkspaceVisible(false);
+
+            // Mikrofon se rozběhne hned při startu aplikace a už se nevypne.
+            // Jeho rozjezd zadrhne o pár snímků a Quest na to reaguje
+            // přesýpacími hodinami — tady to padne do načítání, kde si toho
+            // nikdo nevšimne. Povely se přitom nepřijímají, dokud blok
+            // nezačne.
+            if (voiceSource != null) voiceSource.WarmUpMic();
 
             if (autoStartFirstBlock) StartSession();
         }
@@ -714,6 +761,51 @@ namespace BP.Core
             }
         }
 
+        /// <summary>
+        /// Uklidí blok, který byl připravený, ale nikdy se nerozeběhl.
+        ///
+        /// MEZI „PŘIPRAVENÝ" A „BĚŽÍCÍ" JE DÍRA. RunBlock postaví celé
+        /// pracoviště a otevře log, ale BlockRunning se zapne teprve stiskem
+        /// tlačítka ZAČÍT. Kdo blok přeskočí dřív — a při zkoušení se to dělá
+        /// pořád — projde kolem EndCurrentBlock, protože ta se hned na prvním
+        /// řádku vrátí s tím, že žádný blok neběží.
+        ///
+        /// Co po takovém bloku zůstalo: pracoviště viditelné i v nabídce
+        /// (stůl, inventář, terče, odkládací plocha), zapnutý hlasový vstup,
+        /// log s jediným řádkem BlockStart a neodhlášení posluchači úlohy,
+        /// kteří se při dalším bloku přihlásí podruhé — a chyby se pak
+        /// počítají dvakrát.
+        /// </summary>
+        private void ZavritPripravenyBlok(string duvod)
+        {
+            if (!_cekaNaStart) return;
+
+            _cekaNaStart = false;
+
+            task.TaskCompleted -= OnTaskCompleted;
+            task.WrongObjectCreated -= OnWrongObject;
+            task.PlacementRejected -= OnPlacementRejected;
+
+            if (menuSource != null) menuSource.SetInputEnabled(false);
+            if (voiceSource != null) voiceSource.SetInputEnabled(false);
+
+            if (referenceOnDemand != null) referenceOnDemand.Configure(null, false);
+            if (voiceHelp != null) voiceHelp.SetVisible(false);
+
+            if (menuLock != null) menuLock.SetLocked(false);
+            if (voiceHelpLock != null) voiceHelpLock.SetLocked(false);
+
+            if (secondaryTask != null) secondaryTask.StopTask();
+
+            if (spawner != null) spawner.RemoveAll();
+            SetWorkspaceVisible(false);
+
+            // Log se uzavře řádně, ne jen zahodí. Soubor s jediným řádkem
+            // BlockStart vypadá v datech jako spadlá aplikace; s důvodem
+            // je na první pohled vidět, že blok nikdo neodehrál.
+            if (_logger != null) _logger.CloseBlock(duvod);
+        }
+
         public void StartNextBlock()
         {
             if (BlockRunning)
@@ -731,6 +823,8 @@ namespace BP.Core
 
             if (CurrentBlockIndex >= _order.Count)
             {
+                ZavritPripravenyBlok("blok neodehran, session ukoncena");
+
                 var path = WriteResultsFile();
                 Debug.Log("[TrialManager] Session dokončena." + Environment.NewLine
                           + BuildResultsTable()
@@ -770,6 +864,10 @@ namespace BP.Core
                 Debug.LogError("[TrialManager] Hlasová podmínka není implementovaná — blok přeskočen.");
                 return;
             }
+
+            // Předchozí blok mohl zůstat viset ve stavu „připravený" — třeba
+            // proto, že ho někdo přeskočil dřív, než stiskl ZAČÍT.
+            ZavritPripravenyBlok("blok neodehran, nahrazen dalsim");
 
             ClearScene();
 
@@ -831,8 +929,105 @@ namespace BP.Core
             if (menuLock != null) menuLock.SetLocked(zamknout);
             if (voiceHelpLock != null) voiceHelpLock.SetLocked(zamknout);
 
-            // Sekundární úloha jen v dual-task bloku. Seed z participanta a bloku,
-            // aby stejný participant dostal v obou podmínkách stejnou sekvenci.
+            SetWorkspaceVisible(true);
+            PrepnoutRozhrani(block);
+
+            // AŽ POTOM, co je pracoviště vidět: zviditelnění by jinak
+            // předlohu zase odkrylo a mechanika by v prvním okamžiku selhala.
+            if (referenceOnDemand != null)
+                referenceOnDemand.Configure(_logger, block.referenceOnDemand,
+                    block.condition == InteractionCondition.Voice);
+
+            // PŘEDLOHA JE JEN V BLOKU S PLÁNKEM NA VYŽÁDÁNÍ.
+            //
+            // V ostatních blocích je vodítko uprostřed stavby barevné —
+            // ukazuje tvar i barvu kroku, který je na řadě — takže předloha
+            // vedle neříkala nic navíc. Dva zdroje téže informace navíc
+            // zvou k plánování dopředu, a to každý dělá jinak dlouho.
+            //
+            // Ve třetím bloku je vodítko naopak neutrální: prozradí kam, ne
+            // co. Tam je předloha jediným zdrojem a o to jde — musí se o ni
+            // říct a počítá se, kolikrát.
+            if (referenceVisualizer != null && !block.referenceOnDemand)
+                referenceVisualizer.gameObject.SetActive(false);
+
+            _pripravenyBlok = block;
+
+            // V TUTORIÁLU SE NEČEKÁ. Nácvik nic neměří a další obrazovka
+            // navíc by ho jen prodloužila.
+            if (TutorialRunning)
+            {
+                SpustitMereni();
+                return;
+            }
+
+            // Předloha se schová, dokud participant nepotvrdí, že je
+            // připravený. Kdyby na ni koukal už během rozhlížení, prohlédl by
+            // si stavbu dopředu — a o ten kus by si zkrátil měřený čas.
+            // Každý jinak, takže by to nešlo ani odečíst.
+            SchovatPredlohu(true);
+
+            // BĚHEM ČEKÁNÍ SE NEDÁ NIC VYTVOŘIT. Jinak si člověk stihne
+            // nachystat první objekty dřív, než se začne měřit — a měřená
+            // úloha pak začíná rozdělaná. Hýbat inventářem smí dál, to je
+            // příprava pracoviště, ne řešení úlohy.
+            if (menuSource != null) menuSource.SetAllowedParts(MenuPart.None);
+            if (voiceSource != null) voiceSource.SetAllowedParts(MenuPart.None);
+
+            // Výběr z předchozího bloku nebo z tutoriálu se zahodí. Jinak
+            // začíná blok s už zvýrazněnou barvou a tvarem.
+            if (menuSource != null) menuSource.ClearSelection();
+
+            // Plánek se nedá odkrýt dřív, než se začne měřit. Jinak by si ho
+            // šlo prohlédnout zadarmo — a počet odkrytí, který je v tomhle
+            // bloku měřenou veličinou, by přestal odpovídat skutečnosti.
+            if (referenceOnDemand != null) referenceOnDemand.SetBlocked(true);
+
+            // MIKROFON SE ROZTÁČÍ UŽ TEĎ, ne až se startem měření.
+            // Microphone.Start zabere na Questu znatelnou chvíli; když to
+            // padlo na okamžik spuštění bloku, aplikace zadrhla a systém
+            // ukázal přesýpací hodiny. Tady je na to čas — povely jsou
+            // stejně zamčené, takže mikrofon jen běží naprázdno.
+            if (block.condition == InteractionCondition.Voice && voiceSource != null)
+                voiceSource.SetInputEnabled(true);
+
+            _cekaNaStart = true;
+            Debug.Log($"[TrialManager] Blok {CurrentBlockIndex + 1}/{_order.Count} připraven: {block}");
+            if (BlockReady != null) BlockReady(block, CurrentBlockIndex);
+        }
+
+        /// <summary>
+        /// Participant potvrdil, že je připravený. Teprve teď se odkryje
+        /// předloha a začne se měřit.
+        ///
+        /// PROČ TO NEZAČÍNÁ STISKEM V NABÍDCE: prvních pár vteřin bloku by
+        /// jinak měřilo rozhlížení po místnosti, ne interakci. A protože
+        /// orientace s každým blokem klesá, sečetlo by se to v datech
+        /// s tím, čím se bloky skutečně liší.
+        /// </summary>
+        public void StartReadyBlock()
+        {
+            if (!_cekaNaStart) return;
+            _cekaNaStart = false;
+            SpustitMereni();
+        }
+
+        /// <summary>Čeká se na potvrzení připravenosti?</summary>
+        public bool WaitingForStart => _cekaNaStart;
+
+        private void SpustitMereni()
+        {
+            var block = _pripravenyBlok;
+
+            SchovatPredlohu(false);
+
+            if (menuSource != null) menuSource.SetAllowedParts(MenuPart.All);
+            if (voiceSource != null) voiceSource.SetAllowedParts(MenuPart.All);
+            if (referenceOnDemand != null) referenceOnDemand.SetBlocked(false);
+
+            // Terče se rozbíhají spolu s časem. Kdyby běžely už během
+            // rozhlížení, minul by jich participant několik dřív, než se
+            // vůbec začalo měřit.
             var runSecondary = block.load == LoadCondition.DualTask || runSecondaryInAllBlocks;
             if (runSecondary && secondaryTask != null)
             {
@@ -843,15 +1038,6 @@ namespace BP.Core
                         detail: "POZOR: sekundarni uloha bezi i v single-task bloku (vyvojove nastaveni)");
             }
 
-            SetWorkspaceVisible(true);
-            PrepnoutRozhrani(block);
-
-            // AŽ POTOM, co je pracoviště vidět: zviditelnění by jinak
-            // předlohu zase odkrylo a mechanika by v prvním okamžiku selhala.
-            if (referenceOnDemand != null)
-                referenceOnDemand.Configure(_logger, block.referenceOnDemand,
-                    block.condition == InteractionCondition.Voice);
-
             if (timer != null) timer.StartBlock();
 
             task.StartTask();
@@ -859,6 +1045,28 @@ namespace BP.Core
 
             Debug.Log($"[TrialManager] Blok {CurrentBlockIndex + 1}/{_order.Count}: {block}");
             if (BlockStarted != null) BlockStarted(block, CurrentBlockIndex);
+        }
+
+        /// <summary>
+        /// Schová nebo vrátí předlohu i stavební vodítko. Během čekání na
+        /// start má participant vidět pracoviště a ovládání, ne úlohu.
+        /// </summary>
+        /// <summary>
+        /// Schová nebo vrátí stavební vodítko. Předloha zůstává schovaná vždy.
+        ///
+        /// PŘEDLOHA SE UŽ NIKDE NEZAPÍNÁ SAMA. V blocích i v tutoriálu je
+        /// vodítko barevné, takže by neříkala nic navíc; v bloku s plánkem na
+        /// vyžádání ji rozsvítí teprve ReferenceOnDemand, když si o ni někdo
+        /// řekne. Kdyby ji tahle metoda po startu zapnula, plánek by se ve
+        /// třetím bloku ukázal sám od sebe.
+        /// </summary>
+        private void SchovatPredlohu(bool schovat)
+        {
+            if (templateVisualizer != null)
+                templateVisualizer.gameObject.SetActive(!schovat);
+
+            if (referenceVisualizer != null)
+                referenceVisualizer.gameObject.SetActive(false);
         }
 
         private void OnTaskCompleted()
@@ -1014,16 +1222,29 @@ namespace BP.Core
         }
 
         /// <summary>
-        /// Seed sekvence terčů. Závisí na participantovi a úrovni zátěže,
-        /// NE na podmínce — díky tomu dostane stejný participant v menu
-        /// i v hlasové podmínce identické pořadí terčů.
+        /// Seed sekvence terčů. Závisí na participantovi, úrovni zátěže
+        /// a pořadí bloku v session — NE na podmínce. Stejný participant
+        /// tak dostane v menu i v hlasové podmínce identické pořadí terčů,
+        /// ale dva bloky jedné session se od sebe liší.
+        ///
+        /// POŘADÍ BLOKU TU MUSÍ BÝT. Bez něj se seed skládal jen z ID
+        /// a zátěže, takže dva bloky se stejnou zátěží dostaly tutéž
+        /// sekvenci — terče se rozsvěcovaly ve stejném pořadí na stejných
+        /// místech. Participant si to po prvním bloku pamatuje a ve druhém
+        /// už ví, kde čekat; sekundární úloha tím přestává měřit zbytkovou
+        /// kapacitu a začíná měřit paměť na pořadí.
+        ///
+        /// PODMÍNKA SE DO SEEDU NESMÍ DOSTAT ANI OKLIKOU. Pořadí bloků uvnitř
+        /// podmínky staví stejná BuildOrder ze stejné skupiny counterbalancingu,
+        /// takže blok na i-té pozici klasické session odpovídá i-tému bloku
+        /// hlasové — index je tedy symetrický, jméno šablony by nebylo.
         /// </summary>
         private int ComputeSeed(BlockDefinition block)
         {
             unchecked
             {
                 var h = participantId != null ? participantId.GetHashCode() : 0;
-                return h * 31 + (int)block.load;
+                return h * 31 + (int)block.load * 7 + Mathf.Max(0, CurrentBlockIndex);
             }
         }
 
@@ -1052,7 +1273,21 @@ namespace BP.Core
             // jeho čas je vždycky nejhorší, protože se člověk teprve učí,
             // a participant si ho pak porovnává s měřenými bloky, jako by
             // patřily k sobě. Do logu se samozřejmě zapisuje dál.
-            var merene = _results.FindAll(x => !x.isTraining);
+            // JEDEN ŘÁDEK NA BLOK, a to POSLEDNÍ pokus.
+            //
+            // Opakovaný nebo vývojářsky přeskočený blok přidá do výsledků
+            // další záznam, takže tabulka ukázala čtyři bloky, z toho dva
+            // s plánkem. Do logu patří všechny pokusy, do shrnutí ten, který
+            // nakonec platí.
+            var posledni = new Dictionary<int, BlockResult>();
+            foreach (var r in _results)
+            {
+                if (r.isTraining) continue;
+                posledni[r.index] = r;
+            }
+
+            var merene = new List<BlockResult>(posledni.Values);
+            merene.Sort((a, b) => a.index.CompareTo(b.index));
 
             if (merene.Count == 0) return "Žádné odehrané bloky.";
 

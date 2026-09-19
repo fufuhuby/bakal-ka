@@ -69,6 +69,23 @@ namespace BP.Input
 
         public void SetInputEnabled(bool value) => _inputEnabled = value;
 
+        /// <summary>
+        /// Zruší výběr barvy, tvaru i velikosti.
+        ///
+        /// VOLÁ SE PŘED KAŽDÝM BLOKEM. Výběr jinak přežije konec bloku
+        /// i konec tutoriálu, takže první blok začínal s dlaždicemi
+        /// zvýrazněnými z nácviku — a participant buď stavěl z něčeho,
+        /// co nevybral, nebo musel nejdřív odznačit.
+        /// </summary>
+        public void ClearSelection()
+        {
+            SelectedShape = null;
+            SelectedColor = null;
+            SelectedSize = null;
+
+            if (SelectionChanged != null) SelectionChanged();
+        }
+
         public void SetAllowedParts(MenuPart parts)
         {
             if (AllowedParts == parts) return;

@@ -53,6 +53,17 @@ Write-Host ("nových: {0}   celkem ve složce: {1}" -f ($po - $pred), $po) -Fore
 . (Join-Path $PSScriptRoot "prehled.ps1")
 $pocet = Sestav-Prehled -Slozka $cil
 Write-Host ("přehled sestaven: {0} session -> prehled.csv" -f $pocet) -ForegroundColor Green
+
+# Databáze se staví hned po stažení, aby nešlo zapomenout. Když chybí
+# Python, je to jen vynechaný krok — CSV i přehled jsou hotové a databáze
+# je jen odvozenina, takže se kvůli ní nemá nic zastavit.
+$python = (Get-Command python -ErrorAction SilentlyContinue)
+if ($python) {
+    & $python.Source (Join-Path $PSScriptRoot "databaze.py") $cil
+} else {
+    Write-Host "Python není v PATH — databáze se nepostavila (CSV je v pořádku)." -ForegroundColor Yellow
+}
+
 Write-Host ""
 Write-Host "Disk je synchronizuje sám, nic dalšího dělat nemusíš."
 pause

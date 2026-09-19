@@ -82,3 +82,9 @@ UserSettings/Layouts/CurrentMaximizeLayout.dwlt
 # Lokalni OpenAI klic — NIKDY necommitovat
 Assets/Resources/OpenAIKey*.txt*
 Assets/Resources/OpenAIKey*.txt*.meta
+
+# Přístupové tokeny — do repozitáře nepatří.
+Tools/.turso-token
+Tools/token/
+Tools/token.txt
+Tools/turso-token.txt

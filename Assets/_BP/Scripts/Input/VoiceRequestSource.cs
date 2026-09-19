@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using BP.Core;
 using BP.Logging;
 using UnityEngine;
@@ -141,6 +142,17 @@ namespace BP.Input
                  "že mikrofon neslyšel.")]
         [SerializeField] private float maxSpeechSeconds = 5f;
 
+        [Header("Hlídač mikrofonu")]
+        [Tooltip("Po kolika sekundách úplného ticha se zkusí jiné zařízení. " +
+                 "Vybraný mikrofon totiž nemusí nic posílat — a hlasová " +
+                 "podmínka pak tiše umře, aniž by v logu zůstal řádek.")]
+        [SerializeField] private float tichoNezPrepnout = 4f;
+
+        [Tooltip("Pod touhle hlasitostí se zvuk považuje za digitální ticho, " +
+                 "ne za tichou místnost. Měřeno 19. 9.: mikrofon notebooku " +
+                 "dával v klidu 0,0043, mrtvé zařízení přes Link 0,000014.")]
+        [SerializeField] private float umrleTicho = 0.0002f;
+
         [Header("Ladění")]
         [SerializeField] private bool logToConsole = true;
 
@@ -176,6 +188,29 @@ namespace BP.Input
         private TrialLogger _logger;
         private float[] _chunk;
 
+        // ---- Hlídač hluchého mikrofonu ----
+        //
+        // PROČ TO MUSÍ EXISTOVAT: mikrofon se vybírá podle názvu, jenže název
+        // neříká nic o tom, jestli zařízení opravdu něco posílá. Při zkoušení
+        // z editoru přes Link se hlásí „Headset Microphone (Oculus Virtual
+        // Audio Device)", které vrací digitální ticho — měřeno 19. 9.: špička
+        // 0,00003 proti 0,074 z mikrofonu notebooku. Hlasová podmínka tím
+        // tiše umře: nic se nerozpozná a v logu nezůstane ani řádek, takže to
+        // vypadá, že „hlas prostě nefunguje".
+        //
+        // Hlídač proto nevěří jménu, ale signálu: když z vybraného zařízení
+        // několik vteřin nepřijde vůbec nic, zkusí další v pořadí.
+        //
+        // TICHO SE SČÍTÁ PO SNÍMCÍCH, neporovnává se razítko času. Když je
+        // aplikace na pozadí — sundané brýle, nezaostřený editor — snímky se
+        // nevykonávají, ale hodiny běží dál. Razítko by po návratu ukázalo
+        // desítky vteřin ticha a hlídač by prohlásil za mrtvý mikrofon, který
+        // je v pořádku. Nevykonaný snímek do ticha nepřispěje ničím.
+        private float _ticho;
+        private readonly HashSet<string> _vyzkousene = new HashSet<string>();
+        private bool _hledaniVzdano;
+        private int _koloHledani;
+
         /// <summary>Je vstup připravený? Když ne, hlasová podmínka nepojede.</summary>
         public bool IsReady => _ring != null && !string.IsNullOrEmpty(_apiKey);
 
@@ -198,12 +233,86 @@ namespace BP.Input
 
         // ---- Zapínání ----
 
+        /// <summary>
+        /// Zapne nebo vypne PŘIJÍMÁNÍ povelů. Mikrofon přitom běží dál.
+        ///
+        /// PROČ SE MIKROFON NEVYPÍNÁ: Microphone.Start zabere na Questu
+        /// znatelnou chvíli a při vypínání a zapínání mezi bloky to pokaždé
+        /// zadrhlo o pár snímků — systém na to reaguje přesýpacími hodinami.
+        /// Vypnutý příjem stačí: Update se hned vrátí a nahrávka se nikam
+        /// neposílá, takže se mimo blok nic nesleduje ani neodesílá.
+        ///
+        /// Mikrofon se doopravdy zastaví až v OnDisable, tedy při ukončení
+        /// aplikace nebo vypnutí komponenty.
+        /// </summary>
         public void SetInputEnabled(bool enabled)
         {
             _inputEnabled = enabled;
 
-            if (enabled) StartMic();
-            else StopMic();
+            if (enabled)
+            {
+                // KAŽDÝ BLOK ZAČÍNÁ S ČISTOU TABULÍ. Zařízení, které mlčelo
+                // posledně, mohlo mezitím naskočit; a kdyby si hlídač nesl
+                // „vzdáno" z minulého bloku, druhá půlka session by jela
+                // bez hlasu, aniž by to kdokoli poznal.
+                _vyzkousene.Clear();
+                _koloHledani = 0;
+                _hledaniVzdano = false;
+
+                StartMic();
+                Dosynchronizovat();
+
+                // KTERÝ MIKROFON BLOK POUŽIL, PATŘÍ DO KAŽDÉHO LOGU. Vybírá se
+                // při startu aplikace, kdy ještě žádný logger neexistuje —
+                // bez tohohle řádku by v datech nebylo, na čem session jela,
+                // a hluchý mikrofon by se poznal až podle toho, že celý blok
+                // neobsahuje jediný povel.
+                Zaloguj(LogEvent.Note, "mikrofon=\"" + _device + "\"");
+            }
+            else
+            {
+                // Rozdělaná promluva se zahodí, ať se nedopošle do dalšího bloku.
+                _speaking = false;
+                _cekaNaOdeslani = null;
+                Hlaska("");
+            }
+        }
+
+        /// <summary>
+        /// Rozběhne mikrofon, ale povely zatím nepřijímá.
+        ///
+        /// VOLÁ SE PŘI STARTU APLIKACE. Microphone.Start zabere na Questu
+        /// znatelnou chvíli a systém na vynechané snímky reaguje přesýpacími
+        /// hodinami. Když se to odbude hned po načtení, nikoho to neruší;
+        /// při prvním hlasovém bloku nebo tutoriálu už to vypadá, jako by
+        /// se aplikace zasekla zrovna ve chvíli, kdy se má začít.
+        /// </summary>
+        public void WarmUpMic()
+        {
+            StartMic();
+            _inputEnabled = false;
+        }
+
+        /// <summary>
+        /// Srovná čtecí místo se skutečnou pozicí nahrávání a rozjede hlídač.
+        ///
+        /// MIKROFON BĚŽÍ OD STARTU APLIKACE, ale čte se z něj jen během bloku.
+        /// Mezitím ho smyčka přepsala i několikrát dokola, takže čtecí místo
+        /// ukazuje na několik minut starý zvuk. Bez tohohle by se na začátku
+        /// bloku zpracoval jedním rázem celý kruh staré nahrávky — a začátek
+        /// prvního povelu by v něm utonul.
+        /// </summary>
+        private void Dosynchronizovat()
+        {
+            if (_ring == null || string.IsNullOrEmpty(_device)) return;
+
+            var pos = Microphone.GetPosition(_device);
+            _readPos = pos < 0 ? 0 : pos;
+
+            _speaking = false;
+            _silenceFor = 0f;
+            _speechFor = 0f;
+            _ticho = 0f;
         }
 
         /// <summary>Protějšek MenuRequestSource.SetRequiresSize. Volá TrialManager.</summary>
@@ -261,6 +370,7 @@ namespace BP.Input
             _speaking = false;
             _silenceFor = 0f;
             _speechFor = 0f;
+            _ticho = 0f;
 
             if (logToConsole) Debug.Log("[Voice] Poslouchám (" + _device + ").");
             Hlaska("poslouchám");
@@ -281,7 +391,15 @@ namespace BP.Input
 
         private void Update()
         {
-            if (!_inputEnabled || _ring == null) return;
+            if (!_inputEnabled) return;
+
+            // HLÍDAČ BĚŽÍ JEŠTĚ PŘED ČTENÍM. Doopravdy mrtvé zařízení neposílá
+            // ani jeden vzorek, takže se čtení níž vrátí hned na „žádné nové
+            // vzorky" — a kdyby hlídač seděl až za tím, u toho nejhoršího
+            // případu by se nikdy nespustil.
+            HlidatMikrofon();
+
+            if (_ring == null) return;
 
             // POZOR: NEKONČIT TU, KDYŽ BĚŽÍ ROZPOZNÁVÁNÍ. Dřív se při čekání
             // na odpověď mikrofon vůbec nečetl, takže se všechno vyslovené
@@ -311,6 +429,11 @@ namespace BP.Input
 
             var rms = Rms(_chunk, novych);
             var dt = novych / (float)sampleRate;
+
+            // Živý mikrofon dává i v tiché místnosti hlasitost v řádu tisícin;
+            // mrtvý vrací nuly. Mezi tím je propast dvou řádů, takže se
+            // časovač nedá omylem osvěžit samotným šumem elektroniky.
+            if (rms > umrleTicho) _ticho = 0f;
 
             // Šum se odhaduje jen z ticha, a pomalu. Kdyby se počítal i během
             // řeči, vytáhl by si práh nahoru a usekl konec věty.
@@ -347,6 +470,98 @@ namespace BP.Input
 
             if (_speechFor >= maxSpeechSeconds) { ZahoditPromluvu("prilis dlouhe"); return; }
             if (_silenceFor >= silenceToEnd) UkoncitPromluvu();
+        }
+
+        /// <summary>
+        /// Hlídá, jestli z mikrofonu vůbec něco chodí, a když ne, zkusí jiný.
+        ///
+        /// Mlčení participanta se za poruchu nepovažuje: časovač osvěžuje
+        /// jakýkoli zvuk nad hranicí digitálního ticha, a tu překročí i tichá
+        /// místnost. Sem se tedy dojde jen tehdy, když zařízení neposílá
+        /// doslova nic.
+        /// </summary>
+        private void HlidatMikrofon()
+        {
+            _ticho += Time.unscaledDeltaTime;
+
+            if (_hledaniVzdano) return;
+            if (_ticho < tichoNezPrepnout) return;
+
+            ZkusitJinyMikrofon();
+        }
+
+        /// <summary>
+        /// Přepne na další nevyzkoušené zařízení. Když dojdou, přestane se
+        /// zkoušet — přepínat pořád dokola by bylo horší než zůstat u jednoho.
+        /// </summary>
+        private void ZkusitJinyMikrofon()
+        {
+            if (!string.IsNullOrEmpty(_device)) _vyzkousene.Add(_device);
+
+            foreach (var dalsi in Microphone.devices)
+            {
+                if (dalsi == null || _vyzkousene.Contains(dalsi)) continue;
+
+                Debug.LogWarning("[Voice] Mikrofon \"" + _device + "\" nedává signál — "
+                                 + "přepínám na \"" + dalsi + "\".", this);
+                Zaloguj(LogEvent.Note, "mikrofon \"" + _device + "\" bez signalu, prepinam na \""
+                                       + dalsi + "\"");
+
+                StopMic();
+                _device = dalsi;
+                _ring = Microphone.Start(_device, true, Mathf.CeilToInt(ringSeconds), sampleRate);
+
+                // Časovač se posouvá tak jako tak. Kdyby se posunul jen při
+                // úspěchu, další zařízení by se zkusilo hned v tomtéž snímku
+                // a celý seznam by se protočil dřív, než kterékoli z nich
+                // stihne poslat první vzorek.
+                _ticho = 0f;
+
+                if (_ring == null)
+                {
+                    _vyzkousene.Add(dalsi);
+                    continue;
+                }
+
+                Dosynchronizovat();
+
+                Debug.Log("[Voice] Mikrofon: " + _device);
+                Zaloguj(LogEvent.Note, "mikrofon=\"" + _device + "\"");
+                Hlaska("poslouchám");
+                return;
+            }
+
+            // SEZNAM DOŠEL. Na Questu je ale zařízení jediné, takže „došel"
+            // znamená jen tolik, že se to samé zkusí znovu — restart zaseknutého
+            // mikrofonu je přesně to, co je potřeba, a zahodit hlasovou podmínku
+            // na celý zbytek session kvůli jednomu líně naskakujícímu zařízení
+            // by byla podstatně horší chyba.
+            //
+            // Do nekonečna se to zkoušet nedá: Microphone.Start na Questu zadrhne
+            // o pár snímků a opakovat to každé čtyři vteřiny by z aplikace udělalo
+            // trhavou přehlídku přesýpacích hodin. Tři kola stačí.
+            _koloHledani++;
+
+            if (_koloHledani < 3)
+            {
+                _vyzkousene.Clear();
+                _ticho = 0f;
+
+                Debug.LogWarning("[Voice] Mikrofon mlčí — zkouším ho nastartovat znovu ("
+                                 + _koloHledani + ". kolo).", this);
+
+                StopMic();
+                StartMic();
+                Dosynchronizovat();
+                return;
+            }
+
+            _hledaniVzdano = true;
+
+            Debug.LogError("[Voice] Žádný mikrofon nic neposílá. Zkoušeno: "
+                           + string.Join(", ", Microphone.devices) + ".", this);
+            Zaloguj(LogEvent.Note, "POZOR: zadny mikrofon nedava signal");
+            Hlaska("mikrofon nic neslyší");
         }
 
         /// <summary>
@@ -623,6 +838,16 @@ namespace BP.Input
                     return;
 
                 case VoiceIntent.Reveal:
+                    // Když je zamčené všechno (čeká se na start bloku), nesmí
+                    // jít odkrýt plánek ani povelem — jinak by se dal obejít
+                    // stejně jako tlačítkem.
+                    if (_allowed == MenuPart.None)
+                    {
+                        Zaloguj(LogEvent.Note, spolecne + " -> zamceno pruvodcem");
+                        Hlaska("teď ne");
+                        return;
+                    }
+
                     Zaloguj(LogEvent.ReferenceRevealed, spolecne + " -> hlasem");
                     Hlaska("plánek");
                     if (RevealRequested != null) RevealRequested();

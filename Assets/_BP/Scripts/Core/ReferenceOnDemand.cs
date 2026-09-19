@@ -186,10 +186,25 @@ namespace BP.Core
             RefreshLabel();
         }
 
+        /// <summary>
+        /// Dočasně zakáže odkrývání, aniž by se měnilo nastavení bloku.
+        ///
+        /// POUŽÍVÁ SE PŘI ČEKÁNÍ NA START. Blok už je nachystaný, ale čas
+        /// neběží — a kdyby si participant mohl prohlédnout plánek dřív,
+        /// nezapočítalo by se to odkrytí a měřená veličina by se dala obejít.
+        /// </summary>
+        public void SetBlocked(bool value)
+        {
+            _zablokovano = value;
+            NastavitOvladatelnost();
+        }
+
+        private bool _zablokovano;
+
         /// <summary>Odkryje předlohu na dobu okna. Navěšeno na tlačítko.</summary>
         public void Reveal()
         {
-            if (!IsActive || reference == null) return;
+            if (_zablokovano || !IsActive || reference == null) return;
 
             // OPĚTOVNÝ STISK BĚHEM ODKRYTÍ NEDĚLÁ NIC. Dřív okno prodlužoval,
             // aby se mačkáním nenafoukl počet vyžádání — jenže tím šlo držet
@@ -267,7 +282,7 @@ namespace BP.Core
             if (t == null) return;
 
             var b = t.GetComponent<Button>();
-            if (b != null) b.interactable = !_hlasem;
+            if (b != null) b.interactable = !_hlasem && !_zablokovano;
 
             // Samotné vypnutí Buttonu nestačí — paprsek XRI míří na Image
             // a ten by ho pořád chytal, takže by se na tlačítko dalo „klikat"

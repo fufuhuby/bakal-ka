@@ -422,8 +422,9 @@ namespace BP.Core
             {
                 case Faze.Uvod:
                     Vypsat("", _hlasem ? "Tutoriál hlasu" : "Tutoriál",
-                        "Naučíš se postavit strukturu podle předlohy a reagovat "
-                        + "na terče. Celý nácvik má pět kroků a nikam se nespěchá.",
+                        "Naučíš se postavit strukturu podle drátěné sítě uprostřed "
+                        + "a reagovat na terče. Celý nácvik má pět kroků a nikam "
+                        + "se nespěchá.",
                         "ZAČÍT");
                     break;
 
@@ -436,7 +437,7 @@ namespace BP.Core
                         + "se nemačká. Napřed si ale zkusíš, co dělat, když se "
                         + "rozpoznávání splete: řekni <b>„"
                         + Nazvy.Barva(_spatnaBarva, _spatnyTvar) + " "
-                        + Nazvy.Tvar(_spatnyTvar) + "“</b>. Takový objekt v předloze není.",
+                        + Nazvy.Tvar(_spatnyTvar) + "“</b>. Takový objekt v síti není.",
                         null);
                     break;
 
@@ -447,7 +448,7 @@ namespace BP.Core
                     // tlačítko, tady se to musí vyslovit.
                     Vypsat(Krok(2), "Vrať objekt zpět",
                         _prvniBylSpatny
-                            ? "Vznikl objekt, který v předloze není, takže ho do stavby "
+                            ? "Vznikl objekt, který v síti není, takže ho do stavby "
                               + "nedáš. Přesně tak to vypadá, když se hlas splete. "
                               + "Zbav se ho: řekni <b>„zpět“</b>."
                             : "Tenhle objekt je správný, ale pokládat budeš až za chvíli. "
@@ -458,8 +459,8 @@ namespace BP.Core
 
                 case Faze.RekniZnovu:
                     Vypsat(Krok(3), "Teď ten správný",
-                        "Objekt zmizel. Podívej se do předlohy, co má být dole, "
-                        + "a řekni jeho barvu a tvar. Ten už půjde položit.",
+                        "Objekt zmizel. Podívej se do sítě, jaký tvar a barvu má mít "
+                        + "objekt dole, a řekni je. Ten už půjde položit.",
                         null);
                     break;
 
@@ -498,7 +499,7 @@ namespace BP.Core
                 case Faze.Dostav:
                     Vypsat(Krok(4), "Dostav zbytek",
                         "Výborně. Zbývají dva objekty. Postav je stejným způsobem "
-                        + "podle předlohy vlevo.",
+                        + "podle sítě uprostřed.",
                         null);
                     break;
 
